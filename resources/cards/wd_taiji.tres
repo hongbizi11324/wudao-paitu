@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "wd_taiji"
+card_name = "太极拳"
+card_type = 1
+cost = 1
+description = "获得4点格挡，获得1层剑意"
+block = 4
+school = "wudang"

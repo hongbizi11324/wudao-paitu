@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "xy_lingbo"
+card_name = "凌波微步"
+card_type = 1
+cost = 1
+description = "获得6点格挡。本回合下一张牌费用-1"
+block = 6
+school = "xiaoyao"

@@ -1,0 +1,59 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/rest_screen.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="1"]
+bg_color = Color(0.08, 0.1, 0.08, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.3, 0.45, 0.3, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[node name="RestScreen" type="CanvasLayer"]
+script = ExtResource("1")
+
+[node name="Overlay" type="ColorRect" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 0.65)
+mouse_filter = 1
+
+[node name="Panel" type="Panel" parent="."]
+position = Vector2(340, 180)
+size = Vector2(600, 360)
+theme_override_styles/panel = SubResource(1)
+
+[node name="TitleLabel" type="Label" parent="Panel"]
+position = Vector2(0, 20)
+size = Vector2(600, 40)
+text = "休息点"
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.4, 1, 0.6, 1)
+theme_override_font_sizes/font_size = 24
+
+[node name="DescLabel" type="Label" parent="Panel"]
+position = Vector2(40, 75)
+size = Vector2(520, 50)
+text = ""
+autowrap_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.8, 0.9, 0.9)
+theme_override_font_sizes/font_size = 14
+
+[node name="HealBtn" type="Button" parent="Panel"]
+position = Vector2(100, 160)
+size = Vector2(400, 50)
+text = "调息 — 恢复30%血量"
+theme_override_font_sizes/font_size = 16
+theme_override_colors/font_color = Color(0.4, 1, 0.6, 1)
+
+[node name="CultivateBtn" type="Button" parent="Panel"]
+position = Vector2(100, 230)
+size = Vector2(400, 50)
+text = "冥想 — 获得修为+金币"
+theme_override_font_sizes/font_size = 16
+theme_override_colors/font_color = Color(1, 0.9, 0.4, 1)

@@ -1,0 +1,84 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/shop_screen.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="1"]
+bg_color = Color(0.08, 0.06, 0.12, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.45, 0.35, 0.2, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[node name="ShopScreen" type="CanvasLayer"]
+script = ExtResource("1")
+
+[node name="Overlay" type="ColorRect" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 0.6)
+mouse_filter = 1
+
+[node name="Panel" type="Panel" parent="."]
+position = Vector2(80, 30)
+size = Vector2(1120, 660)
+theme_override_styles/panel = SubResource(1)
+
+[node name="Title" type="Label" parent="Panel"]
+position = Vector2(30, 20)
+size = Vector2(500, 36)
+text = "藏经阁"
+theme_override_colors/font_color = Color(1, 0.9, 0.4, 1)
+theme_override_font_sizes/font_size = 26
+
+[node name="GoldLabel" type="Label" parent="Panel"]
+position = Vector2(30, 60)
+size = Vector2(300, 24)
+text = "金币：20"
+theme_override_colors/font_color = Color(0.4, 1, 0.6, 1)
+theme_override_font_sizes/font_size = 18
+
+[node name="BuyLabel" type="Label" parent="Panel"]
+position = Vector2(30, 100)
+size = Vector2(200, 22)
+text = "─ 购买卡牌 ─"
+theme_override_colors/font_color = Color(0.8, 0.8, 0.9, 0.7)
+theme_override_font_sizes/font_size = 14
+
+[node name="BuyContainer" type="HBoxContainer" parent="Panel"]
+position = Vector2(30, 130)
+size = Vector2(500, 220)
+alignment = 1
+
+[node name="DeleteLabel" type="Label" parent="Panel"]
+position = Vector2(580, 100)
+size = Vector2(200, 22)
+text = "─ 删除卡牌 ─"
+theme_override_colors/font_color = Color(0.8, 0.8, 0.9, 0.7)
+theme_override_font_sizes/font_size = 14
+
+[node name="DeleteScroll" type="ScrollContainer" parent="Panel"]
+position = Vector2(580, 130)
+size = Vector2(500, 440)
+
+[node name="DeleteContainer" type="HFlowContainer" parent="Panel/DeleteScroll"]
+size_flags_horizontal = 3
+size_flags_vertical = 0
+
+[node name="MsgLabel" type="Label" parent="Panel"]
+position = Vector2(30, 580)
+size = Vector2(500, 30)
+text = ""
+theme_override_colors/font_color = Color(1, 0.95, 0.6, 1)
+theme_override_font_sizes/font_size = 16
+
+[node name="ContinueBtn" type="Button" parent="Panel"]
+position = Vector2(480, 618)
+size = Vector2(160, 32)
+text = "继续战斗 >>"
+theme_override_font_sizes/font_size = 16
+theme_override_colors/font_color = Color(1, 0.9, 0.4, 1)

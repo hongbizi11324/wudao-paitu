@@ -1,0 +1,184 @@
+[gd_scene format=3 uid="uid://hnc2ghm0reur"]
+
+[ext_resource type="Script" uid="uid://c7gp04ijcjek" path="res://scripts/main.gd" id="1"]
+[ext_resource type="Script" uid="uid://djgwbpwhx4wsj" path="res://scripts/hand.gd" id="2"]
+[ext_resource type="Script" uid="uid://b4nlwyfilbqui" path="res://scripts/player.gd" id="3"]
+[ext_resource type="Script" uid="uid://dupyagbbuwruo" path="res://scripts/enemy.gd" id="4"]
+[ext_resource type="Script" uid="uid://cf6hmd1wtpotg" path="res://scripts/game_manager.gd" id="5"]
+[ext_resource type="PackedScene" uid="uid://dg8h7kq0oj7cp" path="res://scenes/pile_viewer.tscn" id="6"]
+[ext_resource type="PackedScene" path="res://scenes/reward_screen.tscn" id="7"]
+[ext_resource type="PackedScene" path="res://scenes/shop_screen.tscn" id="8"]
+[ext_resource type="PackedScene" path="res://scenes/node_map.tscn" id="9"]
+[ext_resource type="PackedScene" path="res://scenes/rest_screen.tscn" id="10"]
+[ext_resource type="PackedScene" path="res://scenes/event_screen.tscn" id="11"]
+[ext_resource type="Texture2D" uid="uid://ccpx3jttw6iu8" path="res://assets/images/ui/slices/bar_hp.tres" id="12"]
+
+[node name="Main" type="Node2D" unique_id=1105247720]
+script = ExtResource("1")
+
+[node name="Hand" type="Node2D" parent="." unique_id=1994101365]
+position = Vector2(640, 500)
+script = ExtResource("2")
+
+[node name="Player" type="Node" parent="." unique_id=574163328]
+script = ExtResource("3")
+
+[node name="Enemy" type="Node" parent="." unique_id=1667671710]
+script = ExtResource("4")
+
+[node name="GameManager" type="Node" parent="." unique_id=1068001]
+script = ExtResource("5")
+
+[node name="EnergyLabel" type="Label" parent="." unique_id=2125914123]
+offset_left = 30.0
+offset_top = 80.0
+offset_right = 30.0
+offset_bottom = 80.0
+theme_override_colors/font_color = Color(1, 0.85, 0.2, 1)
+theme_override_font_sizes/font_size = 20
+text = "内力"
+
+[node name="BlockLabel" type="Label" parent="." unique_id=495463251]
+offset_left = 30.0
+offset_top = 110.0
+offset_right = 30.0
+offset_bottom = 110.0
+theme_override_colors/font_color = Color(0.4, 0.6, 1, 1)
+theme_override_font_sizes/font_size = 18
+
+[node name="EnemyHPLabel" type="Label" parent="." unique_id=1679794370]
+offset_left = 940.0
+offset_top = 40.0
+offset_right = 940.0
+offset_bottom = 40.0
+theme_override_colors/font_color = Color(0.9, 0.2, 0.2, 1)
+theme_override_font_sizes/font_size = 22
+text = "敌人"
+
+[node name="EnemyBlockLabel" type="Label" parent="." unique_id=1761600485]
+offset_left = 940.0
+offset_top = 70.0
+offset_right = 940.0
+offset_bottom = 70.0
+theme_override_colors/font_color = Color(0.4, 0.6, 1, 1)
+theme_override_font_sizes/font_size = 16
+
+[node name="EnemyIntentLabel" type="Label" parent="." unique_id=343497733]
+offset_left = 940.0
+offset_top = 95.0
+offset_right = 940.0
+offset_bottom = 95.0
+theme_override_colors/font_color = Color(1, 0.7, 0.3, 1)
+theme_override_font_sizes/font_size = 18
+text = "⚔攻击"
+
+[node name="EndTurnBtn" type="Button" parent="." unique_id=279745062]
+offset_left = 560.0
+offset_top = 420.0
+offset_right = 720.0
+offset_bottom = 464.0
+theme_override_colors/font_color = Color(1, 0.9, 0.4, 1)
+theme_override_font_sizes/font_size = 16
+text = "结束回合 >>"
+
+[node name="PileViewer" parent="." unique_id=1190042860 instance=ExtResource("6")]
+visible = false
+
+[node name="RewardScreen" parent="." unique_id=786212207 instance=ExtResource("7")]
+visible = false
+
+[node name="ShopScreen" parent="." unique_id=2013608964 instance=ExtResource("8")]
+visible = false
+
+[node name="NodeMap" parent="." unique_id=731019764 instance=ExtResource("9")]
+visible = false
+
+[node name="RestScreen" parent="." unique_id=1096292381 instance=ExtResource("10")]
+visible = false
+
+[node name="EventScreen" parent="." unique_id=1163287147 instance=ExtResource("11")]
+visible = false
+
+[node name="DeckLabel" type="Label" parent="." unique_id=1183988519]
+offset_left = 30.0
+offset_top = 140.0
+offset_right = 30.0
+offset_bottom = 140.0
+mouse_filter = 1
+mouse_default_cursor_shape = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.8, 0.8)
+theme_override_font_sizes/font_size = 16
+text = "牌库"
+
+[node name="DiscardLabel" type="Label" parent="." unique_id=296972118]
+offset_left = 110.0
+offset_top = 140.0
+offset_right = 110.0
+offset_bottom = 140.0
+mouse_filter = 1
+mouse_default_cursor_shape = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.8, 0.8)
+theme_override_font_sizes/font_size = 16
+text = "弃牌"
+
+[node name="FloorLabel" type="Label" parent="." unique_id=487290869]
+offset_left = 640.0
+offset_top = 10.0
+offset_right = 640.0
+offset_bottom = 10.0
+theme_override_colors/font_color = Color(1, 0.8, 0.3, 0.6)
+theme_override_font_sizes/font_size = 14
+text = "第 1 层 · 战斗"
+horizontal_alignment = 1
+
+[node name="TurnLabel" type="Label" parent="." unique_id=2054609803]
+offset_left = 640.0
+offset_top = 30.0
+offset_right = 640.0
+offset_bottom = 30.0
+theme_override_colors/font_color = Color(1, 1, 1, 0.7)
+theme_override_font_sizes/font_size = 18
+text = "你的回合"
+horizontal_alignment = 1
+
+[node name="RetryBtn" type="Button" parent="." unique_id=1768109613]
+visible = false
+offset_left = 540.0
+offset_top = 380.0
+offset_right = 740.0
+offset_bottom = 430.0
+theme_override_colors/font_color = Color(1, 0.9, 0.4, 1)
+theme_override_font_sizes/font_size = 20
+text = "重新挑战"
+
+[node name="MenuBtn" type="Button" parent="." unique_id=1701209956]
+visible = false
+offset_left = 540.0
+offset_top = 440.0
+offset_right = 740.0
+offset_bottom = 490.0
+theme_override_colors/font_color = Color(0.7, 0.7, 0.9, 1)
+theme_override_font_sizes/font_size = 20
+text = "返回主菜单"
+
+[node name="BarHp" type="Sprite2D" parent="." unique_id=1891900276]
+position = Vector2(95, 43.000004)
+scale = Vector2(0.1019937, 0.1019937)
+texture = ExtResource("12")
+
+[node name="HpLabel" type="Label" parent="." unique_id=1090278442]
+offset_left = -18.999985
+offset_top = 29.000002
+offset_right = 206.00002
+offset_bottom = 57.0
+theme_override_colors/font_color = Color(1, 0.2, 0.2, 1)
+theme_override_font_sizes/font_size = 20
+text = "HP 60/60"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[connection signal="pressed" from="EndTurnBtn" to="." method="_on_end_turn"]
+[connection signal="gui_input" from="DeckLabel" to="." method="_on_deck_label_clicked"]
+[connection signal="gui_input" from="DiscardLabel" to="." method="_on_discard_label_clicked"]
+[connection signal="pressed" from="RetryBtn" to="." method="_on_retry"]
+[connection signal="pressed" from="MenuBtn" to="." method="_on_back_to_menu"]

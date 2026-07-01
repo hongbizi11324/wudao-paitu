@@ -1,0 +1,12 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "wd_heavy"
+card_name = "真武重剑"
+card_type = 0
+cost = 2
+description = "消耗所有剑意，每层造成5点伤害"
+school = "wudang"

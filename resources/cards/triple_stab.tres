@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "triple_stab"
+card_name = "三连刺"
+card_type = 0
+cost = 2
+description = "造成3点伤害，重复3次"
+damage = 3
+repeat = 3

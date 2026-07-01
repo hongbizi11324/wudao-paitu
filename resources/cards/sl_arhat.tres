@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "sl_arhat"
+card_name = "罗汉伏魔"
+card_type = 0
+cost = 2
+description = "造成6点伤害。消耗所有禅意，每层额外+4伤害"
+damage = 6
+school = "shaolin"

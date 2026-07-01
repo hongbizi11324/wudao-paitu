@@ -1,0 +1,12 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "wd_twoway"
+card_name = "太极两仪"
+card_type = 2
+cost = 3
+description = "核心：每回合首次受击时，获得2层剑意并回复2点生命"
+school = "wudang"

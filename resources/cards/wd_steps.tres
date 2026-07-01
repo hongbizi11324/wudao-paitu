@@ -1,0 +1,14 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "wd_steps"
+card_name = "梯云纵"
+card_type = 1
+cost = 2
+description = "获得6点格挡，抽1张牌。消耗1层剑意：额外抽1张"
+block = 6
+draw = 1
+school = "wudang"

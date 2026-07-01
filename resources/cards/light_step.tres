@@ -1,0 +1,12 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "light_step"
+card_name = "轻身术"
+card_type = 4
+cost = 1
+description = "抽1张牌"
+draw = 1

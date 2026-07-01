@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "sl_golden"
+card_name = "金钟罩"
+card_type = 1
+cost = 2
+description = "获得8点格挡。消耗所有禅意，每层额外+3格挡"
+block = 8
+school = "shaolin"

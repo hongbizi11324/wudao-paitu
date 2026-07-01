@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "xy_zhemel"
+card_name = "天山折梅手"
+card_type = 0
+cost = 2
+description = "造成7点伤害。若手牌≤3张，改为12点"
+damage = 7
+school = "xiaoyao"

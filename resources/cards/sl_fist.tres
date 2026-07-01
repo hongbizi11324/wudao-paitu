@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "sl_fist"
+card_name = "罗汉拳"
+card_type = 0
+cost = 1
+description = "造成4点伤害，获得1层禅意"
+damage = 4
+school = "shaolin"

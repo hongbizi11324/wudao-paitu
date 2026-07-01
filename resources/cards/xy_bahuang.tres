@@ -1,0 +1,12 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "xy_bahuang"
+card_name = "八荒六合"
+card_type = 2
+cost = 3
+description = "核心：每回合开始时，回复3点生命，将1张随机基础牌加入手牌"
+school = "xiaoyao"
