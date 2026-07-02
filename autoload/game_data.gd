@@ -18,9 +18,46 @@ var cultivation_to_next: int = 20  # 突破所需修为
 var gold: int = 0                   # 金币（商店用）
 var max_energy_per_realm: int = 3  # 初始内力上限（淬体境）
 
+# ---------- 角色 ----------
+
+var selected_character: String = ""  # 选择的角色ID
+
+var character_data = {
+	"huiming": {
+		"name": "慧明", "title": "禅宗行者",
+		"desc": "自幼出家，精通佛法与武学",
+		"school": "shaolin"
+	},
+	"linfeng": {
+		"name": "林风", "title": "剑道奇才",
+		"desc": "山林中领悟剑意，快意恩仇",
+		"school": "wudang"
+	},
+	"yunzhi": {
+		"name": "云止", "title": "逍遥散人",
+		"desc": "云游四方，随性而为",
+		"school": "xiaoyao"
+	},
+	"moyao": {
+		"name": "墨瑶", "title": "墨门传人",
+		"desc": "精通机关术与暗器",
+		"school": ""
+	},
+	"xuanweng": {
+		"name": "玄翁", "title": "隐世奇人",
+		"desc": "隐居深山，精通奇门遁甲",
+		"school": ""
+	},
+	"yexiao": {
+		"name": "夜啸", "title": "江湖浪客",
+		"desc": "独行江湖，出手狠辣",
+		"school": ""
+	}
+}
+
 # ---------- 玩家跨战斗数据 ----------
 
-var player_hp: int = 60            # 跨战斗血量（休息/事件中影响）
+var player_hp: int = 60
 var player_max_hp: int = 60
 
 # ---------- 楼层系统 ----------
@@ -252,6 +289,7 @@ func new_run():
 	player_deck = starter_deck.duplicate()
 	player_hp = 60
 	player_max_hp = 60
+	selected_character = ""
 	print("【新局】第1层·淬体境起步，牌组 %d 张" % player_deck.size())
 
 

@@ -31,6 +31,11 @@ var cards_per_turn: int = 4
 @onready var event_screen = $EventScreen
 @onready var retry_btn = $RetryBtn
 @onready var menu_btn = $MenuBtn
+@onready var player_portrait = $PlayerPortrait
+@onready var player_name_label = $PlayerNameLabel
+@onready var enemy_portrait = $EnemyPortrait
+@onready var chan_icon = $ChanIcon
+@onready var jianyi_icon = $JianyiIcon
 
 
 func _ready():
@@ -70,12 +75,24 @@ func _ready():
 	_update_deck_ui()
 	
 	# 创建门派资源标签
+	# 创建门派状态标签（显示数值，图标由 ChanIcon/JianyiIcon 负责）
 	var sl = Label.new()
 	sl.name = "SectLabel"
-	sl.position = Vector2(20, 32)
+	sl.position = Vector2(82, 32)
 	sl.add_theme_color_override("font_color", Color(0.7, 0.9, 1, 1))
 	sl.add_theme_font_size_override("font_size", 14)
 	add_child(sl)
+	
+	# 初始隐藏门派图标
+	chan_icon.visible = false
+	jianyi_icon.visible = false
+	
+	# 加载角色头像
+	if GameData.selected_character != "":
+		var tex_path = "res://assets/images/player/%s.tres" % GameData.selected_character
+		player_portrait.texture = load(tex_path)
+		var char_name = GameData.character_data[GameData.selected_character]["name"]
+		player_name_label.text = char_name
 
 
 # ==============================
@@ -540,12 +557,14 @@ func _update_ui():
 func _update_sect_ui():
 	var parts = []
 	if player.chan > 0:
-		parts.append("🏯禅%d" % player.chan)
+		parts.append("禅%d" % player.chan)
 	if player.jianyi > 0:
-		parts.append("☯剑%d" % player.jianyi)
+		parts.append("剑%d" % player.jianyi)
 	var sl = get_node_or_null("SectLabel")
 	if sl:
 		sl.text = "  ".join(parts) if parts.size() > 0 else ""
+	chan_icon.visible = player.chan > 0
+	jianyi_icon.visible = player.jianyi > 0
 
 func _update_deck_ui():
 	deck_label.text = "牌库 %d" % draw_pile.size()

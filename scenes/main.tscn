@@ -46,6 +46,22 @@ offset_bottom = 110.0
 theme_override_colors/font_color = Color(0.4, 0.6, 1, 1)
 theme_override_font_sizes/font_size = 18
 
+[node name="ChanIcon" type="TextureRect" parent="." unique_id=2000972324]
+offset_left = 72.0
+offset_top = 182.0
+offset_right = 96.0
+offset_bottom = 206.0
+expand_mode = 1
+stretch_mode = 5
+
+[node name="JianyiIcon" type="TextureRect" parent="." unique_id=301012990]
+offset_left = 113.0
+offset_top = 197.0
+offset_right = 137.0
+offset_bottom = 221.0
+expand_mode = 1
+stretch_mode = 5
+
 [node name="EnemyHPLabel" type="Label" parent="." unique_id=1679794370]
 offset_left = 940.0
 offset_top = 40.0
@@ -141,6 +157,15 @@ theme_override_font_sizes/font_size = 18
 text = "你的回合"
 horizontal_alignment = 1
 
+[node name="EnemyPortrait" type="TextureRect" parent="." unique_id=831653137]
+offset_left = 938.0
+offset_top = 220.0
+offset_right = 1018.0
+offset_bottom = 300.0
+scale = Vector2(1.3890656, 1.5262673)
+expand_mode = 1
+stretch_mode = 5
+
 [node name="RetryBtn" type="Button" parent="." unique_id=1768109613]
 visible = false
 offset_left = 540.0
@@ -176,6 +201,23 @@ theme_override_font_sizes/font_size = 20
 text = "HP 60/60"
 horizontal_alignment = 1
 vertical_alignment = 1
+
+[node name="PlayerPortrait" type="TextureRect" parent="." unique_id=2012572356]
+offset_left = 62.0
+offset_top = 234.0
+offset_right = 142.0
+offset_bottom = 314.0
+scale = Vector2(1.7914573, 1.9501362)
+expand_mode = 1
+stretch_mode = 5
+
+[node name="PlayerNameLabel" type="Label" parent="." unique_id=21338646]
+offset_left = 115.0
+offset_top = 207.0
+offset_right = 235.0
+offset_bottom = 230.0
+theme_override_colors/font_color = Color(1, 0.85, 0.3, 1)
+theme_override_font_sizes/font_size = 16
 
 [connection signal="pressed" from="EndTurnBtn" to="." method="_on_end_turn"]
 [connection signal="gui_input" from="DeckLabel" to="." method="_on_deck_label_clicked"]

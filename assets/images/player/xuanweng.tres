@@ -1,0 +1,7 @@
+[gd_resource type="AtlasTexture" format=3 uid="uid://hhmx6ane5mmr"]
+
+[ext_resource type="Texture2D" uid="uid://bgkx2pillsdpy" path="res://assets/images/player/角色抠图.png" id="1_fmxlp"]
+
+[resource]
+atlas = ExtResource("1_fmxlp")
+region = Rect2(2240, 320, 496, 928)

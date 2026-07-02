@@ -2,10 +2,16 @@
 
 [ext_resource type="Script" uid="uid://b2k3umcyddx82" path="res://scripts/start_screen.gd" id="1"]
 [ext_resource type="Texture2D" uid="uid://b1ytathjati3v" path="res://assets/images/backgrounds/logo.png" id="2"]
+[ext_resource type="Texture2D" uid="uid://ckr7brswuoawr" path="res://assets/images/backgrounds/backgroud.png" id="2_r2jwc"]
 [ext_resource type="Texture2D" uid="uid://dkuddil0wpnyt" path="res://assets/images/ui/slices/btn_start.tres" id="3"]
 
 [node name="StartScreen" type="Node2D" unique_id=510260534]
 script = ExtResource("1")
+
+[node name="Backgroud" type="Sprite2D" parent="." unique_id=544901114]
+position = Vector2(636, 373)
+scale = Vector2(0.70996696, 0.7348643)
+texture = ExtResource("2_r2jwc")
 
 [node name="Logo" type="TextureRect" parent="." unique_id=1492572174]
 offset_left = 418.0
