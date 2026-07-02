@@ -55,10 +55,10 @@ expand_mode = 1
 stretch_mode = 5
 
 [node name="JianyiIcon" type="TextureRect" parent="." unique_id=301012990]
-offset_left = 113.0
-offset_top = 197.0
-offset_right = 137.0
-offset_bottom = 221.0
+offset_left = 107.0
+offset_top = 179.0
+offset_right = 131.0
+offset_bottom = 203.0
 expand_mode = 1
 stretch_mode = 5
 

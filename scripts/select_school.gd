@@ -1,111 +1,197 @@
-extends Node2D
+extends CanvasLayer
 
-var selected_char_id: String = ""
+# ==============================
+# 角色选择界面（杀戮尖塔风格）
+# 全屏立绘背景 + 底部头像栏
+# ==============================
 
-var chara_nodes = {
-	"huiming": "CharaHuiMing",
-	"linfeng": "CharaLinFeng",
-	"yunzhi": "CharaYunZhi",
-	"moyao": "CharaMoYao",
-	"xuanweng": "CharaXuanWeng",
-	"yexiao": "CharaYeXiao"
-}
+var hero_ids := ["yunzhi", "linfeng", "yexiao", "moyao", "huiming", "xuanweng"]
+var current_index := 0
 
 var passive_descs = {
-	"huiming": "【待定】少林系被动",
-	"linfeng": "【待定】武当系被动",
-	"yunzhi": "【待定】逍遥系被动",
-	"moyao": "【待定】通用被动",
-	"xuanweng": "【待定】通用被动",
-	"yexiao": "【待定】通用被动"
+	"huiming": "【少林·禅意】每获得1层禅意，回复1点生命",
+	"linfeng": "【武当·剑意】每消耗1层剑意，造成1点额外伤害",
+	"yunzhi": "【逍遥·奇策】每回合第一次出牌，费用-1",
+	"moyao": "【待定】",
+	"xuanweng": "【待定】",
+	"yexiao": "【待定】"
 }
 
+var story_texts = {
+	"huiming": "自幼出家少林，精研佛法与武学。\n以禅入武，以武证禅。",
+	"linfeng": "自幼在山林中长大，与飞禽走兽为伍，\n从自然剑法中领悟了独特的武学之道。",
+	"yunzhi": "逍遥派传人，云游四方，随性而为。\n看似散漫不羁，实则深藏不露。",
+	"moyao": "墨门最后的传人，精通机关术与暗器。\n性格冷静，做事讲究效率。",
+	"xuanweng": "隐居深山的奇人，精通奇门遁甲之术。\n看似疯癫，实则大智若愚。",
+	"yexiao": "江湖上独来独往的浪客，出手狠辣。\n没人知道他的过去，只知道他很强。"
+}
+
+var school_names = {
+	"shaolin": "少林", "wudang": "武当",
+	"xiaoyao": "逍遥", "": "通用"
+}
+
+
 func _ready():
-	for char_id in chara_nodes:
-		var btn = get_node(chara_nodes[char_id])
-		btn.pressed.connect(_on_chara_clicked.bind(char_id))
+	_bind_avatars()
+	show_hero(current_index)
 	
-	$BackBtn.pressed.connect(_on_back)
-	$BackBtn.visible = true
+	$BottomBar/BackBtn.pressed.connect(_on_back)
+	$BottomBar/ConfirmBtn.pressed.connect(_on_confirm)
 
 
-func _on_chara_clicked(char_id: String):
-	selected_char_id = char_id
-	
-	var data = GameData.character_data[char_id]
-	$Title.text = data["name"] + " - " + data["title"]
-	$Subtitle.text = data["desc"]
-	$PassiveLabel.text = "被动能力："
-	$DescLabel.text = passive_descs[char_id]
-	
-	for cid in chara_nodes:
-		var btn = get_node(chara_nodes[cid])
-		var label = get_node(chara_nodes[cid] + "Label")
-		if cid == char_id:
-			btn.modulate = Color(1, 1, 1, 1)
-			label.modulate = Color(1, 1, 1, 1)
+# ==============================
+# 绑定手动放置的头像
+# ==============================
+
+func _bind_avatars():
+	var container = $BottomBar/AvatarContainer
+	for i in range(container.get_child_count()):
+		if i >= hero_ids.size():
+			break
+		var child = container.get_child(i)
+		child.mouse_filter = 1
+		child.gui_input.connect(_on_avatar_gui.bind(i))
+		child.mouse_entered.connect(_on_avatar_enter.bind(i))
+		child.mouse_exited.connect(_on_avatar_exit.bind(i))
+
+
+func _on_avatar_gui(event: InputEvent, index: int):
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		show_hero(index)
+
+
+func _on_avatar_enter(index: int):
+	var child = $BottomBar/AvatarContainer.get_child(index)
+	if child and index != current_index:
+		child.modulate = Color(0.7, 0.7, 0.7, 0.8)
+
+
+func _on_avatar_exit(index: int):
+	var child = $BottomBar/AvatarContainer.get_child(index)
+	if child:
+		if index == current_index:
+			child.modulate = Color(1, 1, 1, 1)
 		else:
-			btn.modulate = Color(0.5, 0.5, 0.5, 0.7)
-			label.modulate = Color(0.5, 0.5, 0.5, 0.7)
-	
-	GameData.selected_character = char_id
-	_show_school_select()
+			child.modulate = Color(0.5, 0.5, 0.5, 0.6)
 
 
-func _show_school_select():
-	for cid in chara_nodes:
-		get_node(chara_nodes[cid]).visible = false
-		get_node(chara_nodes[cid] + "Label").visible = false
+# ==============================
+# 显示角色（只切换可见性）
+# ==============================
+
+func show_hero(index: int):
+	if index < 0 or index >= hero_ids.size():
+		return
 	
-	$Subtitle.visible = false
-	$PassiveLabel.visible = false
-	$DescLabel.visible = false
+	current_index = index
+	var hid = hero_ids[index]
+	var data = GameData.character_data[hid]
 	
-	$Title.text = "选择你的门派"
+	# 切换全屏立绘：隐藏所有，显示选中的
+	for hid2 in hero_ids:
+		var node = $PortraitContainer.get_node_or_null(hid2 + "_bg")
+		if node:
+			node.visible = (hid2 == hid)
 	
-	if not has_node("BtnShaolin"):
-		var btn_shaolin = Button.new()
-		btn_shaolin.name = "BtnShaolin"
-		btn_shaolin.position = Vector2(380, 280)
-		btn_shaolin.size = Vector2(160, 200)
-		btn_shaolin.text = "少林\n\n罗汉拳\n铁布衫"
-		btn_shaolin.add_theme_color_override("font_color", Color(1, 0.85, 0.3, 1))
-		btn_shaolin.add_theme_font_size_override("font_size", 18)
-		btn_shaolin.autowrap_mode = 1
-		add_child(btn_shaolin)
-		btn_shaolin.pressed.connect(_on_shaolin)
-		
-		var btn_wudang = Button.new()
-		btn_wudang.name = "BtnWudang"
-		btn_wudang.position = Vector2(560, 280)
-		btn_wudang.size = Vector2(160, 200)
-		btn_wudang.text = "武当\n\n太极拳\n柔云剑"
-		btn_wudang.add_theme_color_override("font_color", Color(0.6, 0.8, 1, 1))
-		btn_wudang.add_theme_font_size_override("font_size", 18)
-		btn_wudang.autowrap_mode = 1
-		add_child(btn_wudang)
-		btn_wudang.pressed.connect(_on_wudang)
-		
-		var btn_xiaoyao = Button.new()
-		btn_xiaoyao.name = "BtnXiaoyao"
-		btn_xiaoyao.position = Vector2(740, 280)
-		btn_xiaoyao.size = Vector2(160, 200)
-		btn_xiaoyao.text = "逍遥\n\n北冥神掌\n凌波微步"
-		btn_xiaoyao.add_theme_color_override("font_color", Color(0.7, 0.5, 1, 1))
-		btn_xiaoyao.add_theme_font_size_override("font_size", 18)
-		btn_xiaoyao.autowrap_mode = 1
-		add_child(btn_xiaoyao)
-		btn_xiaoyao.pressed.connect(_on_xiaoyao)
+	# 头像高亮
+	var container = $BottomBar/AvatarContainer
+	for i in range(container.get_child_count()):
+		var child = container.get_child(i)
+		if i == index:
+			child.modulate = Color(1, 1, 1, 1)
+		else:
+			child.modulate = Color(0.5, 0.5, 0.5, 0.6)
+	
+	# 信息面板
+	$InfoPanel/CharName.text = data.get("name", "")
+	$InfoPanel/CharTitle.text = data.get("title", "")
+	$InfoPanel/PassiveDesc.text = passive_descs.get(hid, "待定")
+	$InfoPanel/StoryDesc.text = story_texts.get(hid, "")
+	
+	GameData.selected_character = hid
+
+
+# ==============================
+# 确认
+# ==============================
+
+func _on_confirm():
+	var hid = hero_ids[current_index]
+	var data = GameData.character_data[hid]
+	var school = data.get("school", "")
+	
+	if school != "":
+		start_run(school)
 	else:
-		$BtnShaolin.visible = true
-		$BtnWudang.visible = true
-		$BtnXiaoyao.visible = true
+		_show_school_picker()
+
+
+func _show_school_picker():
+	var old = get_node_or_null("SchoolPicker")
+	if old:
+		old.queue_free()
+	
+	var picker = Panel.new()
+	picker.name = "SchoolPicker"
+	picker.offset_left = 340
+	picker.offset_top = 200
+	picker.offset_right = 940
+	picker.offset_bottom = 520
+	
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.06, 0.12, 0.95)
+	style.border_width_left = 2
+	style.border_width_top = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.border_color = Color(0.45, 0.35, 0.2, 1)
+	style.corner_radius_top_left = 12
+	style.corner_radius_top_right = 12
+	style.corner_radius_bottom_right = 12
+	style.corner_radius_bottom_left = 12
+	picker.add_theme_stylebox_override("panel", style)
+	add_child(picker)
+	
+	var title = Label.new()
+	title.text = "选择你的门派"
+	title.position = Vector2(0, 30)
+	title.size = Vector2(600, 40)
+	title.horizontal_alignment = 1
+	title.add_theme_color_override("font_color", Color(1, 0.9, 0.4, 1))
+	title.add_theme_font_size_override("font_size", 22)
+	picker.add_child(title)
+	
+	var schools = ["shaolin", "wudang", "xiaoyao"]
+	var school_info = {
+		"shaolin": {"name": "少林", "desc": "罗汉拳 · 铁布衫", "color": Color(1, 0.85, 0.3, 1)},
+		"wudang":  {"name": "武当", "desc": "太极拳 · 柔云剑", "color": Color(0.6, 0.8, 1, 1)},
+		"xiaoyao": {"name": "逍遥", "desc": "北冥神掌 · 凌波微步", "color": Color(0.7, 0.5, 1, 1)}
+	}
+	
+	var i = 0
+	for sk in schools:
+		var info = school_info[sk]
+		var btn = Button.new()
+		btn.position = Vector2(80, 100 + i * 100)
+		btn.size = Vector2(440, 80)
+		btn.text = "%s\n%s" % [info["name"], info["desc"]]
+		btn.add_theme_color_override("font_color", info["color"])
+		btn.add_theme_font_size_override("font_size", 18)
+		btn.autowrap_mode = 1
+		btn.pressed.connect(_on_pick_school.bind(sk, picker))
+		picker.add_child(btn)
+		i += 1
+
+
+func _on_pick_school(school: String, picker: Panel):
+	picker.queue_free()
+	start_run(school)
 
 
 func start_run(school: String):
 	GameData.new_run()
-	if selected_char_id != "":
-		GameData.selected_character = selected_char_id
+	GameData.selected_character = hero_ids[current_index]
 	
 	match school:
 		"shaolin":
@@ -120,15 +206,6 @@ func start_run(school: String):
 	
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
-
-func _on_shaolin():
-	start_run("shaolin")
-
-func _on_wudang():
-	start_run("wudang")
-
-func _on_xiaoyao():
-	start_run("xiaoyao")
 
 func _on_back():
 	get_tree().change_scene_to_file("res://scenes/start_screen.tscn")

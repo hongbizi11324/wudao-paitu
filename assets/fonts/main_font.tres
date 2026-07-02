@@ -1,0 +1,25 @@
+[gd_resource type="FontFile" format=3 uid="uid://brv2ikhiq84lv"]
+
+[ext_resource type="FontFile" uid="uid://bncxte71solul" path="res://assets/fonts/南西初夏宋-简繁.ttf" id="1_8b2gt"]
+
+[resource]
+fallbacks = Array[Font]([ExtResource("1_8b2gt")])
+cache/0/variation_coordinates = {}
+cache/0/face_index = 0
+cache/0/embolden = 0.0
+cache/0/transform = Transform2D(1, 0, 0, 1, 0, 0)
+cache/0/spacing_top = 0
+cache/0/spacing_bottom = 0
+cache/0/spacing_space = 0
+cache/0/spacing_glyph = 0
+cache/0/baseline_offset = 0.0
+cache/0/16/0/ascent = 0.0
+cache/0/16/0/descent = 0.0
+cache/0/16/0/underline_position = 0.0
+cache/0/16/0/underline_thickness = 0.0
+cache/0/16/0/scale = 1.0
+cache/0/50/0/ascent = 0.0
+cache/0/50/0/descent = 0.0
+cache/0/50/0/underline_position = 0.0
+cache/0/50/0/underline_thickness = 0.0
+cache/0/50/0/scale = 1.0

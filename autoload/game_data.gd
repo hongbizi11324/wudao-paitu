@@ -34,7 +34,7 @@ var character_data = {
 		"school": "wudang"
 	},
 	"yunzhi": {
-		"name": "云止", "title": "逍遥散人",
+		"name": "云芷", "title": "逍遥散人",
 		"desc": "云游四方，随性而为",
 		"school": "xiaoyao"
 	},

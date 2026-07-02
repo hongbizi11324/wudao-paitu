@@ -1,0 +1,10 @@
+[gd_resource type="Theme" format=3]
+
+[ext_resource type="FontFile" path="res://assets/fonts/main_font.tres" id="1_b8sgd"]
+
+[resource]
+
+Button/font = ExtResource("1_b8sgd")
+Button/font_size = 16
+Label/font = ExtResource("1_b8sgd")
+Label/font_size = 14

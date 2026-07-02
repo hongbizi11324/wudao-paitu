@@ -4,6 +4,8 @@
 [ext_resource type="Texture2D" uid="uid://b1ytathjati3v" path="res://assets/images/backgrounds/logo.png" id="2"]
 [ext_resource type="Texture2D" uid="uid://ckr7brswuoawr" path="res://assets/images/backgrounds/backgroud.png" id="2_r2jwc"]
 [ext_resource type="Texture2D" uid="uid://dkuddil0wpnyt" path="res://assets/images/ui/slices/btn_start.tres" id="3"]
+[ext_resource type="Texture2D" uid="uid://diuwpcgr2ear2" path="res://assets/images/ui/slices/QuitBtn.tres" id="4_hm208"]
+[ext_resource type="FontFile" uid="uid://bncxte71solul" path="res://assets/fonts/南西初夏宋-简繁.ttf" id="5_5pab1"]
 
 [node name="StartScreen" type="Node2D" unique_id=510260534]
 script = ExtResource("1")
@@ -33,22 +35,43 @@ text = "以武入道 · 登顶武道"
 horizontal_alignment = 1
 
 [node name="TestBtn" type="Button" parent="." unique_id=1212220745]
-offset_left = 547.0
-offset_top = 483.0
-offset_right = 747.0
-offset_bottom = 523.0
+offset_left = 11.0
+offset_top = 666.0
+offset_right = 211.0
+offset_bottom = 706.0
 theme_override_colors/font_color = Color(0.7, 0.7, 0.6, 1)
 theme_override_font_sizes/font_size = 16
 text = "测试模式"
 
-[node name="QuitBtn" type="Button" parent="." unique_id=1078403065]
-offset_left = 549.0
-offset_top = 534.0
-offset_right = 749.0
-offset_bottom = 574.0
-theme_override_colors/font_color = Color(0.7, 0.7, 0.8, 1)
-theme_override_font_sizes/font_size = 16
-text = "退出"
+[node name="QuitBtn" type="TextureButton" parent="." unique_id=1769393362]
+offset_left = 537.00006
+offset_top = 598.00006
+offset_right = 961.00006
+offset_bottom = 726.00006
+scale = Vector2(0.55854, 0.5155093)
+texture_normal = ExtResource("4_hm208")
+
+[node name="Label" type="Label" parent="QuitBtn" unique_id=1343065948]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -58.883194
+offset_top = -20.084343
+offset_right = -18.883194
+offset_bottom = 2.915657
+grow_horizontal = 2
+grow_vertical = 2
+scale = Vector2(3.2432835, 2.1201925)
+theme_override_colors/font_color = Color(0.955965, 0.8663741, 0.5708568, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
+theme_override_constants/shadow_offset_x = 3
+theme_override_constants/shadow_outline_size = 3
+theme_override_fonts/font = ExtResource("5_5pab1")
+theme_override_font_sizes/font_size = 18
+text = "退     出"
 
 [node name="BtnStart" type="TextureButton" parent="." unique_id=895257130]
 offset_left = 549.0
