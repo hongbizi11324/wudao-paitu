@@ -6,6 +6,7 @@
 [node name="Card" type="ColorRect" unique_id=384725317]
 offset_right = 140.0
 offset_bottom = 210.0
+scale = Vector2(0.83511597, 0.8029158)
 mouse_filter = 1
 color = Color(0.15, 0.15, 0.22, 1)
 script = ExtResource("1")

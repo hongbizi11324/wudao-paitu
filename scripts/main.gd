@@ -37,8 +37,43 @@ var cards_per_turn: int = 4
 @onready var chan_icon = $ChanIcon
 @onready var jianyi_icon = $JianyiIcon
 
+# ---- 战斗场景资源 ----
+const BIOME_BG = {
+	GameData.Biome.FOREST: preload("res://assets/main_screen/竹林.tres"),
+	GameData.Biome.VILLAGE: preload("res://assets/main_screen/村庄.tres"),
+	GameData.Biome.GOV_OFFICE: preload("res://assets/main_screen/官府.tres"),
+	GameData.Biome.SECT: preload("res://assets/main_screen/门派.tres"),
+}
+
+const BIOME_ENEMIES = {
+	GameData.Biome.FOREST: {
+		"normal": ["山匪", "强盗"],
+		"elite": ["老虎", "熊"],
+		"boss": ["山寨头领"],
+	},
+	GameData.Biome.VILLAGE: {
+		"normal": ["流民", "顽童"],
+		"elite": ["官兵", "门派弟子"],
+		"boss": ["丐帮掌门"],
+	},
+	GameData.Biome.GOV_OFFICE: {
+		"normal": ["官兵", "门派弟子"],
+		"elite": ["门派弟子·女"],
+		"boss": ["官兵统领", "少林掌门"],
+	},
+	GameData.Biome.SECT: {
+		"normal": ["门派弟子", "门派弟子·女"],
+		"elite": ["门派长老"],
+		"boss": ["武当掌门"],
+	},
+}
+
+
+@onready var _battle_bg: TextureRect = $BattleBg
+
 
 func _ready():
+
 	# 连接信号
 	hand.card_selected.connect(_on_card_played)
 	player.energy_changed.connect(_on_energy_changed)
@@ -627,8 +662,26 @@ func _start_battle():
 	var ft = GameData.get_floor_type()
 	var ft_names = ["普通", "精英", "Boss"]
 	enemy.init_from_floor(GameData.current_floor, ft)
+	
+	# 设置背景图
+	var biome_names = ["竹林", "村庄", "官府", "门派"]
+	var bg_tex = BIOME_BG.get(GameData.current_biome)
+	if bg_tex:
+		_battle_bg.texture = bg_tex
+	
+	# 从当前生态的敌人池里随机选一个
+	var pool = BIOME_ENEMIES.get(GameData.current_biome, {})
+	var key = "boss" if ft == GameData.FloorType.BOSS else ("elite" if ft == GameData.FloorType.ELITE else "normal")
+	var candidates = pool.get(key, ["山匪"])
+	if candidates.size() > 0:
+		var eid = candidates[randi() % candidates.size()]
+		var tex_path = "res://assets/images/enemies/%s.tres" % eid
+		enemy_portrait.texture = load(tex_path)
+		print("敌人: %s" % eid)
+	
 	_update_floor_label()
-	print("===== 第 %d 层 · %s战 =====" % [GameData.current_floor, ft_names[ft]])
+	var biome_name = biome_names[GameData.current_biome] if GameData.current_biome < biome_names.size() else "?"
+	print("===== 第 %d 层 · %s战 · %s =====" % [GameData.current_floor, ft_names[ft], biome_name])
 
 
 func _update_floor_label():

@@ -8,9 +8,7 @@ extends ColorRect
 # ==============================
 
 var card_data: CardData
-var original_x: float  # 在 Hand 中排列时的 X 位置
-
-signal clicked(card)
+signal clicked()
 
 
 func setup(data: CardData):
@@ -65,4 +63,4 @@ func _gui_input(event):
 	and event.pressed \
 	and event.button_index == MOUSE_BUTTON_LEFT:
 		get_viewport().set_input_as_handled()
-		clicked.emit(self)
+		clicked.emit()

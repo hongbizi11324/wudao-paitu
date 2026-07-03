@@ -367,10 +367,14 @@ func heal_player(percent: float):
 # 杀戮尖塔风格地图系统
 # ============================================================
 
+# ---- 战斗场景生态 ----
+enum Biome { FOREST, VILLAGE, GOV_OFFICE, SECT }
+
 const MAP_COLUMN_COUNT: int = 7          # 地图列数（杀戮尖塔风格）
 const MAP_TOTAL_LAYERS: int = 12         # 每大关总层数（含起点+Boss）
 const MAP_NODE_MIN_PER_LAYER: int = 1    # 每层最少节点
 const MAP_NODE_MAX_PER_LAYER: int = 3    # 每层最多节点
+var current_biome: Biome = Biome.FOREST  # 当前大关的战斗场景
 var map_active: bool = false           # 地图是否已激活
 var map_layers: Array = []             # 每层的节点数据
 var map_connections: Array = []        # 连线: [{from_layer,from_node,to_layer,to_node}]
@@ -394,6 +398,7 @@ func generate_new_act():
 	"""
 	生成一个大关的地图布局。
 	固定12层：0=起点 → 1~10=路径 → 11=Boss
+	同时随机选取本大关的战斗场景（biome）。
 	"""
 	map_act_count += 1
 	var start_floor = map_act_count * MAP_TOTAL_LAYERS + 1
@@ -402,6 +407,12 @@ func generate_new_act():
 	map_connections = []
 	map_node_states = []
 	var total_layers = MAP_TOTAL_LAYERS
+	
+	# 根据大关随机选场景
+	if map_act_count == 0:
+		current_biome = [Biome.FOREST, Biome.VILLAGE].pick_random()
+	else:
+		current_biome = [Biome.GOV_OFFICE, Biome.SECT].pick_random()
 	
 	# 生成每层节点
 	for i in range(total_layers):
