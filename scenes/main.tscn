@@ -8,7 +8,7 @@
 [ext_resource type="PackedScene" uid="uid://dg8h7kq0oj7cp" path="res://scenes/pile_viewer.tscn" id="6"]
 [ext_resource type="PackedScene" path="res://scenes/reward_screen.tscn" id="7"]
 [ext_resource type="PackedScene" path="res://scenes/shop_screen.tscn" id="8"]
-[ext_resource type="PackedScene" path="res://scenes/node_map.tscn" id="9"]
+[ext_resource type="PackedScene" uid="uid://b65yoeorrw5n3" path="res://scenes/node_map.tscn" id="9"]
 [ext_resource type="PackedScene" path="res://scenes/rest_screen.tscn" id="10"]
 [ext_resource type="PackedScene" path="res://scenes/event_screen.tscn" id="11"]
 [ext_resource type="Texture2D" uid="uid://ccpx3jttw6iu8" path="res://assets/images/ui/slices/bar_hp.tres" id="12"]
@@ -55,10 +55,10 @@ expand_mode = 1
 stretch_mode = 5
 
 [node name="JianyiIcon" type="TextureRect" parent="." unique_id=301012990]
-offset_left = 107.0
-offset_top = 179.0
-offset_right = 131.0
-offset_bottom = 203.0
+offset_left = 120.0
+offset_top = 186.0
+offset_right = 144.0
+offset_bottom = 210.0
 expand_mode = 1
 stretch_mode = 5
 

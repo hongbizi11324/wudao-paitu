@@ -1,0 +1,7 @@
+[gd_resource type="AtlasTexture" format=3 uid="uid://br5hspqbb0jan"]
+
+[ext_resource type="Texture2D" uid="uid://c8vkjlrqw0d21" path="res://assets/images/ui/路径选择2_2.png" id="1_rouch"]
+
+[resource]
+atlas = ExtResource("1_rouch")
+region = Rect2(1347, 133, 615, 675)
