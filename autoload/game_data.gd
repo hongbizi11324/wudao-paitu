@@ -21,6 +21,8 @@ var max_energy_per_realm: int = 3  # 初始内力上限（淬体境）
 # ---------- 角色 ----------
 
 var selected_character: String = ""  # 选择的角色ID
+var is_dual_mode: bool = false  # 是否双人模式
+var selected_character_2: String = "" # P2选择的角色ID（双人模式）
 
 var character_data = {
 	"huiming": {
@@ -59,6 +61,12 @@ var character_data = {
 
 var player_hp: int = 60
 var player_max_hp: int = 60
+
+# 双人模式 - 玩家2数据
+var player2_hp: int = 60
+var player2_max_hp: int = 60
+var player2_deck: Array = []
+var player2_realm: int = 0
 
 # ---------- 楼层系统 ----------
 
@@ -306,6 +314,49 @@ func new_run_custom(deck: Array):
 	print("【测试】第1层·自定义牌组 %d 张" % player_deck.size())
 
 
+# ---------- 双人模式函数 ----------
+
+func new_dual_run():
+	current_floor = 1
+	current_realm = 0
+	cultivation = 0
+	cultivation_to_next = 20
+	gold = 20
+	max_energy_per_realm = 3
+	
+	# 玩家1初始化
+	player_deck = starter_deck.duplicate()
+	player_hp = 60
+	player_max_hp = 60
+	
+	# 玩家2初始化
+	player2_deck = starter_deck.duplicate()
+	player2_hp = 60
+	player2_max_hp = 60
+	player2_realm = 0
+	
+	print("【双人模式】第1层·双玩家起步，每人 %d 张牌" % player_deck.size())
+
+
+func heal_player2(percent: float):
+	player2_hp = mini(player2_max_hp, player2_hp + ceili(player2_max_hp * percent))
+	print("玩家2恢复 %d%% 血量，当前 %d/%d" % [percent * 100, player2_hp, player2_max_hp])
+
+
+func add_card_to_player2(card_id: String):
+	player2_deck.append(card_id)
+	print("玩家2牌组 +%s（共 %d 张）" % [card_id, player2_deck.size()])
+
+
+func remove_card_from_player2_deck(card_id: String) -> bool:
+	var idx = player2_deck.find(card_id)
+	if idx == -1:
+		return false
+	player2_deck.remove_at(idx)
+	print("玩家2牌组 -%s（剩余 %d 张）" % [card_id, player2_deck.size()])
+	return true
+
+
 func add_cultivation(amount: int):
 	cultivation += amount
 	print("修为 +%d（%d/%d）" % [amount, cultivation, cultivation_to_next])
@@ -458,9 +509,9 @@ func _gen_column_nodes(ft: FloorType, layer_idx: int, total: int) -> Array:
 	layer 11 = Boss（col=3）
 	"""
 	if layer_idx == 0:
-		return [{ "type": NodeType.EVENT, "col": MAP_COLUMN_COUNT / 2, "is_start": true }]
+		return [{ "type": NodeType.EVENT, "col": int(MAP_COLUMN_COUNT / 2.0), "is_start": true }]
 	if layer_idx == total - 1:
-		return [{ "type": NodeType.BATTLE_ELITE, "is_boss": true, "col": MAP_COLUMN_COUNT / 2 }]
+		return [{ "type": NodeType.BATTLE_ELITE, "is_boss": true, "col": int(MAP_COLUMN_COUNT / 2.0) }]
 	
 	var count = randi_range(MAP_NODE_MIN_PER_LAYER, MAP_NODE_MAX_PER_LAYER)
 	

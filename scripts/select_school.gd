@@ -7,6 +7,8 @@ extends CanvasLayer
 
 var hero_ids := ["yunzhi", "linfeng", "yexiao", "moyao", "huiming", "xuanweng"]
 var current_index := 0
+var _pick_count: int = 0  # 双人选择计数: 0=未选, 1=P1, 2=P2
+var _p1_school: String = ""  # P1选的门派
 
 var passive_descs = {
 	"huiming": "【少林·禅意】每获得1层禅意，回复1点生命",
@@ -34,7 +36,11 @@ var school_names = {
 
 func _ready():
 	_bind_avatars()
+	_pick_count = 0
 	show_hero(current_index)
+	
+	if GameData.is_dual_mode:
+		$InfoPanel/CharName.text = "玩家1选择角色"
 	
 	$BottomBar/BackBtn.pressed.connect(_on_back)
 	$BottomBar/ConfirmBtn.pressed.connect(_on_confirm)
@@ -121,10 +127,27 @@ func _on_confirm():
 	var data = GameData.character_data[hid]
 	var school = data.get("school", "")
 	
-	if school != "":
-		start_run(school)
+	if _pick_count == 0:
+		# ── 玩家1选角色 ──
+		GameData.selected_character = hid
+		_pick_count = 1
+		if school != "":
+			_p1_school = school
+			_after_p1_pick()
+		else:
+			_show_school_picker()
+	elif _pick_count == 1 and GameData.is_dual_mode:
+		# ── 玩家2选角色 ──
+		GameData.selected_character_2 = hid
+		_pick_count = 2
+		if school != "":
+			_start_dual_run(school)
+		else:
+			_show_school_picker()
 	else:
-		_show_school_picker()
+		# ── 单人确认 ──
+		GameData.selected_character = hid
+		start_run(school)
 
 
 func _show_school_picker():
@@ -186,13 +209,61 @@ func _show_school_picker():
 
 func _on_pick_school(school: String, picker: Panel):
 	picker.queue_free()
-	start_run(school)
+	if _pick_count == 1:
+		_p1_school = school
+		if GameData.is_dual_mode:
+			_after_p1_pick()
+		else:
+			start_run(school)
+	elif _pick_count == 2:
+		_start_dual_run(school)
+	else:
+		start_run(school)
+
+
+func _after_p1_pick():
+	"""P1选完角色+门派，界面切到P2选择"""
+	if GameData.is_dual_mode:
+		$InfoPanel/CharName.text = "玩家2选择角色"
+		$InfoPanel/PassiveDesc.text = "请选择第二位角色"
+		$InfoPanel/StoryDesc.text = ""
+		var saved = GameData.selected_character
+		current_index = 0
+		show_hero(0)
+		GameData.selected_character = saved
+	else:
+		start_run(_p1_school)
+
+
+func _start_dual_run(school_p2: String):
+	"""双人：两人都选完，开战"""
+	GameData.new_dual_run()
+	
+	# 玩家1的门派牌
+	match _p1_school:
+		"shaolin":
+			GameData.add_card("sl_fist"); GameData.add_card("sl_iron")
+		"wudang":
+			GameData.add_card("wd_taiji"); GameData.add_card("wd_soft")
+		"xiaoyao":
+			GameData.add_card("xy_beiming"); GameData.add_card("xy_lingbo")
+	
+	# 玩家2的门派牌
+	match school_p2:
+		"shaolin":
+			GameData.add_card_to_player2("sl_fist"); GameData.add_card_to_player2("sl_iron")
+		"wudang":
+			GameData.add_card_to_player2("wd_taiji"); GameData.add_card_to_player2("wd_soft")
+		"xiaoyao":
+			GameData.add_card_to_player2("xy_beiming"); GameData.add_card_to_player2("xy_lingbo")
+	
+	# 启动双人战斗场景
+	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 
 func start_run(school: String):
 	GameData.new_run()
 	GameData.selected_character = hero_ids[current_index]
-	
 	match school:
 		"shaolin":
 			GameData.add_card("sl_fist")
@@ -203,7 +274,6 @@ func start_run(school: String):
 		"xiaoyao":
 			GameData.add_card("xy_beiming")
 			GameData.add_card("xy_lingbo")
-	
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 

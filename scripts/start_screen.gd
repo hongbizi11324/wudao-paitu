@@ -8,6 +8,9 @@ func _ready():
 	$BtnStart.mouse_entered.connect(_on_start_hover)
 	$BtnStart.mouse_exited.connect(_on_start_unhover)
 	$TestBtn.pressed.connect(_on_test)
+	$DualBtn.pressed.connect(_on_dual)
+	$DualBtn.mouse_entered.connect(_on_dual_hover)
+	$DualBtn.mouse_exited.connect(_on_dual_unhover)
 	$MusicBtn.pressed.connect(_on_music_toggle)
 	$QuitBtn.pressed.connect(_on_quit)
 	$QuitBtn.mouse_entered.connect(_on_quit_hover)
@@ -31,6 +34,12 @@ func _on_start_unhover():
 
 
 func _on_start():
+	GameData.is_dual_mode = false
+	get_tree().change_scene_to_file("res://scenes/select_school.tscn")
+
+
+func _on_dual():
+	GameData.is_dual_mode = true
 	get_tree().change_scene_to_file("res://scenes/select_school.tscn")
 
 
@@ -48,6 +57,15 @@ func _on_quit_unhover():
 	var tw = create_tween()
 	tw.tween_property($QuitBtn, "scale", _quit_orig_scale, 0.08)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _on_dual_hover():
+	var tw = create_tween()
+	tw.tween_property($DualBtn, "scale", Vector2(1.05, 1.05), 0.1)
+
+func _on_dual_unhover():
+	var tw = create_tween()
+	tw.tween_property($DualBtn, "scale", Vector2(1, 1), 0.08)
 
 
 func _on_music_toggle():

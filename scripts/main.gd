@@ -2,23 +2,24 @@ extends Node2D
 
 var draw_pile = []   # 牌库
 var discard_pile = [] # 弃牌堆
-var game_over = false   # 游戏是否结束
+var game_over = false
 
-# 每回合抽牌数
-var cards_per_turn: int = 4
-
-@onready var hand = $Hand
-@onready var player = $Player
+@onready var hand1 = $Hand1
+@onready var hand2 = $Hand2
+@onready var player1 = $Player1
+@onready var player2 = $Player2
 @onready var enemy = $Enemy
 @onready var gm = $GameManager
 
-@onready var hp_label = $HpLabel
+@onready var p1_hp_label = $Player1HpLabel
+@onready var p2_hp_label = $Player2HpLabel
+@onready var p1_energy_label = $EnergyLabel
+@onready var p1_block_label = $BlockLabel
 @onready var enemy_hp_label = $EnemyHPLabel
 @onready var enemy_block_label = $EnemyBlockLabel
 @onready var enemy_intent_label = $EnemyIntentLabel
 @onready var floor_label = $FloorLabel
-@onready var energy_label = $EnergyLabel
-@onready var block_label = $BlockLabel
+
 @onready var end_turn_btn = $EndTurnBtn
 @onready var turn_label = $TurnLabel
 @onready var deck_label = $DeckLabel
@@ -31,11 +32,26 @@ var cards_per_turn: int = 4
 @onready var event_screen = $EventScreen
 @onready var retry_btn = $RetryBtn
 @onready var menu_btn = $MenuBtn
-@onready var player_portrait = $PlayerPortrait
-@onready var player_name_label = $PlayerNameLabel
-@onready var enemy_portrait = $EnemyPortrait
+@onready var p1_portrait = $Player1Portrait
+@onready var p2_portrait = $Player2Portrait
 @onready var chan_icon = $ChanIcon
 @onready var jianyi_icon = $JianyiIcon
+@onready var p1_name_label = $Player1NameLabel
+@onready var p2_name_label = $Player2NameLabel
+@onready var enemy_portrait = $EnemyPortrait
+
+var _active_player: int = 1  # 1=玩家1, 2=玩家2
+var _ready_p1: bool = false
+var _ready_p2: bool = false
+
+# 当前活跃玩家的别名（方便现有代码直接引用）
+var hand: Node2D
+var player: Node
+var player_portrait: TextureRect
+var player_name_label: Label
+var hp_label: Label
+var energy_label: Label
+var block_label: Label
 
 # ---- 战斗场景资源 ----
 const BIOME_BG = {
@@ -73,14 +89,27 @@ const BIOME_ENEMIES = {
 
 
 func _ready():
+	# 先设置别名，确保信号触发时不会null
+	hand = hand1
+	player = player1
+	hp_label = p1_hp_label
+	energy_label = p1_energy_label
+	block_label = p1_block_label
+	player_portrait = p1_portrait
+	player_name_label = p1_name_label
 
-	# 连接信号
-	hand.card_selected.connect(_on_card_played)
-	player.energy_changed.connect(_on_energy_changed)
-	player.hp_changed.connect(_on_hp_changed)
-	player.block_changed.connect(_on_block_changed)
+	# 连接信号 — 双方都连
+	hand1.card_selected.connect(_on_card_played)
+	hand2.card_selected.connect(_on_card_played)
+	player1.energy_changed.connect(_on_energy_changed)
+	player2.energy_changed.connect(_on_energy_changed)
+	player1.hp_changed.connect(_on_hp_changed)
+	player2.hp_changed.connect(_on_hp_changed)
+	player1.block_changed.connect(_on_block_changed)
+	player2.block_changed.connect(_on_block_changed)
 	enemy.hp_changed.connect(_on_enemy_hp_changed)
-	player.died.connect(_on_player_died)
+	player1.died.connect(_on_player_died)
+	player2.died.connect(_on_player_died)
 	enemy.died.connect(_on_enemy_died_by_signal)
 	enemy.block_changed.connect(_on_enemy_block_changed)
 	enemy.intent_changed.connect(_on_enemy_intent_changed)
@@ -97,85 +126,107 @@ func _ready():
 		node_map.open()
 		return
 	
-	# 正常战斗初始化
-	player.init()
+	# 初始化
+	player1.init()
+	player2.init(true)
 	_start_battle()
-	_shuffle_deck()
+	
+	# 单人模式：隐藏玩家2
+	if not GameData.is_dual_mode:
+		hand2.visible = false
+		p2_portrait.visible = false
+		p2_name_label.visible = false
+		p2_hp_label.visible = false
+		hand1.visible = true
+	
+	# 牌组
+	draw_pile = GameData.player_deck.duplicate()
+	draw_pile.shuffle()
+	
+	if GameData.is_dual_mode:
+		var p2_draw = GameData.player2_deck.duplicate()
+		p2_draw.shuffle()
+		_switch_draw(hand2, p2_draw)
 	
 	_update_ui()
-	_update_deck_ui()
+	_switch_draw(hand1, draw_pile)
 	
-	_draw_cards(cards_per_turn)
-	_update_turn_label("你的回合")
-	_update_deck_ui()
-	
-	# 创建门派资源标签
-	# 创建门派状态标签（显示数值，图标由 ChanIcon/JianyiIcon 负责）
-	var sl = Label.new()
-	sl.name = "SectLabel"
-	sl.position = Vector2(82, 32)
-	sl.add_theme_color_override("font_color", Color(0.7, 0.9, 1, 1))
-	sl.add_theme_font_size_override("font_size", 14)
-	add_child(sl)
-	
-	# 初始隐藏门派图标
-	chan_icon.visible = false
-	jianyi_icon.visible = false
-	
-	# 加载角色头像
+	# 加载头像
 	if GameData.selected_character != "":
-		var tex_path = "res://assets/images/player/%s.tres" % GameData.selected_character
-		player_portrait.texture = load(tex_path)
-		var char_name = GameData.character_data[GameData.selected_character]["name"]
-		player_name_label.text = char_name
+		p1_portrait.texture = load("res://assets/images/player/%s.tres" % GameData.selected_character)
+		p1_name_label.text = GameData.character_data[GameData.selected_character]["name"]
+	if GameData.is_dual_mode and GameData.selected_character_2 != "":
+		p2_portrait.texture = load("res://assets/images/player/%s.tres" % GameData.selected_character_2)
+		p2_name_label.text = GameData.character_data[GameData.selected_character_2]["name"]
+	else:
+		p2_name_label.text = "玩家2"
+	
+	_switch_to(1)
+	if not GameData.is_dual_mode:
+		_update_turn_label("你的回合")
 
 
 # ==============================
 # 牌库操作
 # ==============================
 
-func _shuffle_deck():
-	draw_pile = GameData.player_deck.duplicate()
-	draw_pile.shuffle()
-	discard_pile.clear()
+func _switch_to(p: int):
+	_active_player = p
+	if p == 1:
+		hand = hand1
+		player = player1
+		player_portrait = p1_portrait
+		player_name_label = p1_name_label
+		hp_label = p1_hp_label
+		energy_label = p1_energy_label
+		block_label = p1_block_label
+		hand1.visible = true
+		hand2.visible = false
+	else:
+		hand = hand2
+		player = player2
+		player_portrait = p2_portrait
+		player_name_label = p2_name_label
+		hp_label = p2_hp_label
+		energy_label = p1_energy_label
+		block_label = p1_block_label
+		hand1.visible = false
+		hand2.visible = true
+	_update_ui()
+	_update_turn_label("玩家%d的回合" % p)
 
 
-func _draw_cards(count: int):
+func _on_p1_portrait_clicked(event: InputEvent):
+	if event is InputEventMouseButton and event.pressed:
+		_switch_to(1)
+
+
+func _on_p2_portrait_clicked(event: InputEvent):
+	if event is InputEventMouseButton and event.pressed:
+		_switch_to(2)
+
+
+func _switch_draw(h: Node2D, pile: Array, count: int = 4):
+	"""给指定手牌抽指定数量牌，牌库空则回收弃牌堆"""
 	var card_scene = load("res://scenes/card.tscn")
-	var drawn = 0
 	for i in range(count):
-		if draw_pile.size() == 0:
-			draw_pile = discard_pile.duplicate()
-			draw_pile.shuffle()
-			discard_pile.clear()
-		if draw_pile.size() == 0:
-			break
-		
-		var card_id = draw_pile.pop_back()
+		if pile.size() == 0:
+			if discard_pile.size() > 0:
+				# 回收弃牌堆到牌库
+				draw_pile = discard_pile.duplicate()
+				draw_pile.shuffle()
+				discard_pile.clear()
+				pile = draw_pile
+			else:
+				break
+		var card_id = pile.pop_back()
 		var path = "res://resources/cards/%s.tres" % card_id
 		var data = load(path)
 		var card = card_scene.instantiate()
 		card.setup(data)
-		
-		if card_id == "punch":
-			card.get_node("DescLabel").text = "造成%d点伤害" % GameData.get_punch_damage()
-		if card_id == "meditate":
-			card.get_node("DescLabel").text = "获得%d点内力" % GameData.get_meditate_gain()
-		
-		var bonus = GameData.get_damage_bonus()
-		if bonus > 0 and card_id != "punch" and card_id != "meditate":
-			var desc = card.get_node("DescLabel")
-			if data.damage > 0 or data.block > 0:
-				desc.text = desc.text + " (+%d)" % bonus
-		
-		if hand.add_card(card):
-			drawn += 1
-		else:
-			discard_pile.append(card_id)
+		if not h.add_card(card):
 			card.queue_free()
-	
-	print("抽了 %d 张牌（手牌 %d，牌库 %d，弃牌 %d）" % [drawn, hand.cards.size(), draw_pile.size(), discard_pile.size()])
-	_update_deck_ui()
+	print("抽牌完成")
 
 
 func _unhandled_input(event):
@@ -323,7 +374,7 @@ func _on_card_played(card):
 	
 	# ===== 抽牌 =====
 	if data.draw + extra_draw > 0:
-		_draw_cards(data.draw + extra_draw)
+		_switch_draw(hand, draw_pile, data.draw + extra_draw)
 	
 	# ===== 弃牌/消耗 =====
 	if not is_consumed:
@@ -345,31 +396,66 @@ func _on_card_played(card):
 func _on_end_turn():
 	if game_over:
 		return
+	
 	if hand.selected_card != null:
 		hand.deselect()
 	
-	for c in hand.cards.duplicate():
+	# ── 单人模式：直接结束 ──
+	if not GameData.is_dual_mode:
+		for c in hand.cards.duplicate():
+			if c.card_data.retain:
+				continue
+			discard_pile.append(c.card_data.card_id)
+			hand.remove_card(c)
+			c.queue_free()
+		end_turn_btn.disabled = true
+		turn_label.text = "敌人回合"
+		gm.start_enemy_turn(player1, enemy)
+		if game_over:
+			return
+		_switch_draw(hand1, draw_pile)
+		_trigger_power_effects()
+		_update_ui()
+		end_turn_btn.disabled = false
+		return
+	
+	# ── 双人模式 ──
+	if _active_player == 1:
+		_ready_p1 = true
+	else:
+		_ready_p2 = true
+	
+	var ready_hand = hand
+	for c in ready_hand.cards.duplicate():
 		if c.card_data.retain:
 			continue
 		discard_pile.append(c.card_data.card_id)
-		hand.remove_card(c)
+		ready_hand.remove_card(c)
 		c.queue_free()
+	end_turn_btn.text = "等待玩家%d" % (2 if _active_player == 1 else 1)
+	_switch_to(2 if _active_player == 1 else 1)
 	
-	end_turn_btn.disabled = true
-	turn_label.text = "敌人回合"
-	gm.start_enemy_turn(player, enemy)
-	
-	if game_over:
-		return
-	
-	_draw_cards(cards_per_turn)
-	
-	# POWER效果（新回合开始触发）
-	_trigger_power_effects()
-	
-	_update_ui()
-	end_turn_btn.disabled = false
-	_update_turn_label("你的回合")
+	if _ready_p1 and _ready_p2:
+		_ready_p1 = false
+		_ready_p2 = false
+		end_turn_btn.disabled = true
+		end_turn_btn.text = "敌人回合..."
+		turn_label.text = "敌人回合"
+		for c in hand.cards.duplicate():
+			if c.card_data.retain:
+				continue
+			discard_pile.append(c.card_data.card_id)
+			hand.remove_card(c)
+			c.queue_free()
+		gm.start_enemy_turn(player1, enemy)
+		if game_over:
+			return
+		_switch_draw(hand1, draw_pile)
+		_switch_draw(hand2, draw_pile)
+		_trigger_power_effects()
+		_switch_to(1)
+		end_turn_btn.disabled = false
+		_update_ui()
 
 
 # ==============================
@@ -455,10 +541,10 @@ func _on_retry():
 	menu_btn.visible = false
 	player.init()
 	_start_battle()
-	_shuffle_deck()
+	# shuffle handled in _on_retry
 	hand.clear()
 	_update_ui()
-	_draw_cards(cards_per_turn)
+	_switch_draw(hand1, draw_pile, 4)
 	_update_turn_label("你的回合")
 	_update_deck_ui()
 

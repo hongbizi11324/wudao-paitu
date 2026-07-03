@@ -39,7 +39,7 @@ signal died()
 
 
 # 初始化（每场战斗开始调用）
-func init():
+func init(use_p2_hp: bool = false):
 	# 重置门派变量
 	chan = 0
 	jianyi = 0
@@ -50,9 +50,12 @@ func init():
 	first_hit_this_turn = true
 	
 	# 从 GameData 读取跨战斗血量
-	# 从 GameData 读取跨战斗血量
-	max_hp = GameData.player_max_hp
-	hp = GameData.player_hp
+	if use_p2_hp:
+		max_hp = GameData.player2_max_hp
+		hp = GameData.player2_hp
+	else:
+		max_hp = GameData.player_max_hp
+		hp = GameData.player_hp
 	block = 0
 	# 从 GameData 读取当前境界的内力上限
 	energy_per_turn = GameData.max_energy_per_realm
