@@ -92,7 +92,8 @@ func _on_join():
 		_toast("请输入主机IP地址")
 		return
 	if NetworkManager.join_game(ip):
-		NetworkManager.game_ready.connect(_on_network_ready)
+		if not NetworkManager.game_ready.is_connected(_on_network_ready):
+			NetworkManager.game_ready.connect(_on_network_ready)
 		_toast("正在连接...")
 
 

@@ -47,6 +47,10 @@ func host_game(port: int = DEFAULT_PORT) -> bool:
 
 
 func join_game(ip: String, port: int = DEFAULT_PORT) -> bool:
+	# 防止重复连接
+	if is_lan:
+		cleanup()
+	
 	var peer = ENetMultiplayerPeer.new()
 	var err = peer.create_client(ip, port)
 	if err != OK:
@@ -57,7 +61,8 @@ func join_game(ip: String, port: int = DEFAULT_PORT) -> bool:
 	is_lan = true
 	is_host = false
 	
-	multiplayer.connected_to_server.connect(_on_connected_to_server)
+	if not multiplayer.connected_to_server.is_connected(_on_connected_to_server):
+		multiplayer.connected_to_server.connect(_on_connected_to_server)
 	
 	# ⏱ 连接超时
 	_start_timeout()
@@ -73,6 +78,13 @@ func cleanup():
 	is_host = false
 	p2_peer_id = 0
 	_stop_timeout()
+	# 断开所有信号避免重复连接
+	if multiplayer.connected_to_server.is_connected(_on_connected_to_server):
+		multiplayer.connected_to_server.disconnect(_on_connected_to_server)
+	if multiplayer.peer_connected.is_connected(_on_peer_connected):
+		multiplayer.peer_connected.disconnect(_on_peer_connected)
+	if multiplayer.peer_disconnected.is_connected(_on_peer_disconnected):
+		multiplayer.peer_disconnected.disconnect(_on_peer_disconnected)
 	print("[网络] 资源已清理")
 
 
@@ -82,7 +94,6 @@ func cleanup():
 
 func _on_connected_to_server():
 	print("[网络] 已连接服务器，等待种子...")
-	_stop_timeout()
 
 
 func _on_peer_connected(id: int):
@@ -102,6 +113,7 @@ func _on_peer_disconnected(id: int):
 # ── 客机接收种子 ──
 @rpc("any_peer", "reliable")
 func _receive_seed(seed_val: int):
+	_stop_timeout()
 	shared_seed = seed_val
 	seed(seed_val)
 	print("[网络] 收到种子=%d" % seed_val)
