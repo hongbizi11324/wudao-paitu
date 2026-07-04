@@ -192,6 +192,7 @@ func _ready():
 		# 客机：不启动 TurnManager，等主机的 RPC 驱动
 		_switch_to(1)
 		_update_ui()
+		_show_waiting_mask("等待主机同步状态...")
 		_update_deck_ui()
 	else:
 		turn_manager.turn_started.connect(_on_turn_started)
@@ -219,7 +220,7 @@ func _on_turn_started(turn: int):
 	
 	# 局域网：主机同步回合给客机
 	if NetworkManager.is_lan and NetworkManager.is_host:
-		NetworkManager.rpc("sync_turn", turn)
+		NetworkManager.push_snapshot()
 
 
 func network_sync_turn(turn: int):
@@ -727,7 +728,7 @@ func _on_end_turn():
 
 func _do_end_turn():
 	"""纯结束回合逻辑（不含网络路由）"""
-	if hand.selected_card != None:
+	if hand.selected_card != null:
 		hand.deselect()
 	
 	var my_discard = discard_pile_p2 if _active_player == 2 else discard_pile
@@ -771,6 +772,111 @@ func network_execute_end_turn(player_id: int):
 	if player_id != _active_player:
 		_switch_to(player_id)
 	_do_end_turn()
+
+
+# ==============================
+# 🆕 状态快照同步（客机）
+# ==============================
+
+var _waiting_mask: ColorRect = null
+
+
+func apply_snapshot(snap: Dictionary):
+	"""客机收到主机快照后更新UI"""
+	# 回合显示
+	match snap["turn"]:
+		TurnManager.Turn.PLAYER1:
+			turn_label.text = "玩家1回合"
+		TurnManager.Turn.PLAYER2:
+			turn_label.text = "玩家2回合"
+		TurnManager.Turn.ENEMY:
+			turn_label.text = "敌人回合"
+	_active_player = snap["active_player"]
+	
+	# 玩家1
+	player1.hp = snap["p1_hp"]
+	player1.max_hp = snap["p1_max_hp"]
+	player1.block = snap["p1_block"]
+	player1.energy = snap["p1_energy"]
+	_diff_hand(hand1, snap["p1_hand_ids"])
+	deck_label.text = "牌库 %d" % snap["p1_draw_count"]
+	discard_label.text = "弃牌 %d" % snap["p1_discard_count"]
+	
+	# 玩家2
+	if snap["is_dual"] and player2:
+		player2.hp = snap["p2_hp"]
+		player2.max_hp = snap["p2_max_hp"]
+		player2.block = snap["p2_block"]
+		player2.energy = snap["p2_energy"]
+		_diff_hand(hand2, snap["p2_hand_ids"])
+	
+	# 敌人
+	var e = get_node_or_null("Enemy")
+	if e and snap["enemy_exists"]:
+		e.hp = snap["enemy_hp"]; e.max_hp = snap["enemy_max_hp"]
+		e.block = snap["enemy_block"]
+	
+	# 全局
+	game_over = snap["game_over"]
+	_update_ui()
+	_hide_waiting_mask()
+
+
+func _diff_hand(hand_node, target_ids: Array):
+	"""增量更新手牌：只增删有变化的卡，不重建全部"""
+	var current_ids = []
+	for c in hand_node.cards:
+		current_ids.append(c.card_data.card_id)
+	
+	# 移除多余的
+	var to_remove = []
+	for i in range(current_ids.size()):
+		if current_ids[i] not in target_ids:
+			to_remove.append(hand_node.cards[i])
+	for card in to_remove:
+		hand_node.remove_card(card)
+	
+	# 添加缺少的
+	for cid in target_ids:
+		var found = false
+		for c in hand_node.cards:
+			if c.card_data.card_id == cid:
+				found = true
+				break
+		if not found:
+			var path = "res://resources/cards/%s.tres" % cid
+			var data = load(path)
+			if data:
+				var card_scene = load("res://scenes/card.tscn")
+				var card = card_scene.instantiate()
+				card.setup(data)
+				hand_node.add_card(card)
+
+
+# ==============================
+# 等待遮罩
+# ==============================
+
+func _show_waiting_mask(text: String):
+	_hide_waiting_mask()
+	_waiting_mask = ColorRect.new()
+	_waiting_mask.color = Color(0, 0, 0, 0.8)
+	_waiting_mask.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_waiting_mask.mouse_filter = Control.MOUSE_FILTER_STOP
+	var label = Label.new()
+	label.text = text
+	label.add_theme_color_override("font_color", Color.WHITE)
+	label.add_theme_font_size_override("font_size", 24)
+	label.anchor_right = 1.0; label.anchor_bottom = 1.0
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_waiting_mask.add_child(label)
+	add_child(_waiting_mask)
+
+func _hide_waiting_mask():
+	if _waiting_mask:
+		_waiting_mask.queue_free()
+		_waiting_mask = null
 
 
 # ==============================

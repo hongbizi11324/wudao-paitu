@@ -177,7 +177,7 @@ func request_play(card_id: String, player_id: int):
 		return
 	# 主机执行，然后广播
 	_safe_call("network_execute_play", [card_id, player_id])
-	rpc("sync_play", card_id, player_id)
+	push_snapshot()
 
 
 # 客机请求结束回合
@@ -188,7 +188,7 @@ func request_end_turn(player_id: int):
 	if not _valid_player(player_id):
 		return
 	_safe_call("network_execute_end_turn", [player_id])
-	rpc("sync_end_turn", player_id)
+	push_snapshot()
 
 
 # ==============================
@@ -218,6 +218,7 @@ func sync_select_node(node_type: int):
 	var main = get_tree().current_scene
 	if main and main.has_method("network_select_node"):
 		main.network_select_node(node_type)
+	push_snapshot()
 
 
 # 主机选完角色，同步角色和牌组给客机
@@ -240,3 +241,25 @@ func sync_turn(turn_id: int):
 	if not main or not main.has_method("network_sync_turn"):
 		return
 	main.network_sync_turn(turn_id)
+
+# ==============================
+# 🆕 状态快照同步
+# ==============================
+
+func push_snapshot():
+	if not is_host:
+		return
+	var main = get_tree().current_scene
+	if not main or main.scene_file_path != "res://scenes/main.tscn":
+		return
+	if not main.has_method("apply_snapshot"):
+		return
+	var snap = GameStateSync.build_snapshot(main)
+	rpc("sync_game_state", snap)
+
+
+@rpc("authority", "reliable")
+func sync_game_state(state: Dictionary):
+	var main = get_tree().current_scene
+	if main and main.has_method("apply_snapshot"):
+		main.apply_snapshot(state)
