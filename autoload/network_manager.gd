@@ -163,36 +163,53 @@ func _valid_card(card_id: String) -> bool:
 	return card_id.length() > 0 and card_id.length() < 64
 
 
-# P1或P2打牌同步
-@rpc("any_peer", "call_local", "reliable")
-func sync_play(card_id: String, player_id: int):
+# ==============================
+# 客户端 → 主机（请求）
+# 客户端发起请求，只有主机处理
+# ==============================
+
+# 客机请求出牌
+@rpc("any_peer", "reliable")
+func request_play(card_id: String, player_id: int):
+	if not is_host:
+		return  # 只有主机处理
 	if not _valid_player(player_id) or not _valid_card(card_id):
-		push_error("[网络] sync_play 参数非法: pid=%d card=%s" % [player_id, card_id])
 		return
-	_on_remote_play(card_id, player_id)
+	# 主机执行，然后广播
+	_safe_call("network_execute_play", [card_id, player_id])
+	rpc("sync_play", card_id, player_id)
 
 
-# 结束回合同步
-@rpc("any_peer", "call_local", "reliable")
-func sync_end_turn(player_id: int):
+# 客机请求结束回合
+@rpc("any_peer", "reliable")
+func request_end_turn(player_id: int):
+	if not is_host:
+		return
 	if not _valid_player(player_id):
-		push_error("[网络] sync_end_turn 参数非法: pid=%d" % player_id)
 		return
-	_on_remote_end_turn(player_id)
+	_safe_call("network_execute_end_turn", [player_id])
+	rpc("sync_end_turn", player_id)
 
 
-func _on_remote_play(card_id: String, player_id: int):
+# ==============================
+# 主机 → 所有节点（广播）
+# 主机执行完，广播给所有人执行同样的逻辑
+# ==============================
+
+@rpc("authority", "reliable")
+func sync_play(card_id: String, player_id: int):
+	_safe_call("network_execute_play", [card_id, player_id])
+
+
+@rpc("authority", "reliable")
+func sync_end_turn(player_id: int):
+	_safe_call("network_execute_end_turn", [player_id])
+
+
+func _safe_call(method: String, args: Array):
 	var main = get_tree().current_scene
-	if not main or not main.has_method("network_execute_play"):
-		return
-	main.network_execute_play(card_id, player_id)
-
-
-func _on_remote_end_turn(player_id: int):
-	var main = get_tree().current_scene
-	if not main or not main.has_method("network_execute_end_turn"):
-		return
-	main.network_execute_end_turn(player_id)
+	if main and main.has_method(method):
+		main.callv(method, args)
 
 
 # 地图节点同步
