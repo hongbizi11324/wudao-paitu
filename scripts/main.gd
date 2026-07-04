@@ -357,11 +357,11 @@ func _unhandled_input(event):
 # ==============================
 
 func _on_card_played(card):
-	if game_over or _in_rpc:
+	if game_over:
 		return
 	
-	# 局域网：客机发请求，主机执行+broadcast
-	if NetworkManager.is_lan:
+	# 局域网路由：_in_rpc=true表示来自广播，跳过路由直接执行
+	if NetworkManager.is_lan and not _in_rpc:
 		if not NetworkManager.is_host:
 			NetworkManager.rpc_id(1, "request_play", card.card_data.card_id, _active_player)
 			return
@@ -705,7 +705,8 @@ func _on_card_played(card):
 		_on_battle_end(true)
 	
 	# 局域网主机：执行完广播给客机
-	if NetworkManager.is_lan and NetworkManager.is_host:
+	# 局域网主机：执行完广播给客机（_in_rpc 防止广播回来的sync_play再次广播）
+	if NetworkManager.is_lan and NetworkManager.is_host and not _in_rpc:
 		NetworkManager.rpc("sync_play", card.card_data.card_id, _active_player)
 	return
 
@@ -719,8 +720,8 @@ func _on_end_turn():
 	if game_over or _in_rpc or turn_manager.current_turn == TurnManager.Turn.ENEMY:
 		return
 	
-	# 局域网：客机发请求，主机执行+broadcast
-	if NetworkManager.is_lan:
+	# 局域网路由
+	if NetworkManager.is_lan and not _in_rpc:
 		if not NetworkManager.is_host:
 			NetworkManager.rpc_id(1, "request_end_turn", _active_player)
 			return
@@ -742,7 +743,7 @@ func _on_end_turn():
 	turn_manager.end_player_turn()
 	
 	# 局域网主机：执行完广播给客机
-	if NetworkManager.is_lan and NetworkManager.is_host:
+	if NetworkManager.is_lan and NetworkManager.is_host and not _in_rpc:
 		NetworkManager.rpc("sync_end_turn", _active_player)
 
 
