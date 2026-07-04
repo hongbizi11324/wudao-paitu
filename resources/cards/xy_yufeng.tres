@@ -4,11 +4,11 @@
 
 [resource]
 script = ExtResource("1")
-card_id = "xy_lingbo"
-card_name = "凌波微步"
+card_id = "xy_yufeng"
+card_name = "御风而行"
 card_type = 1
-cost = 1
-description = "获得6点格挡。本回合下一张牌费用-1"
+cost = 2
+description = "获得6点格挡。若手牌≥4张，额外获得4点"
 damage = 0
 block = 6
 heal = 0

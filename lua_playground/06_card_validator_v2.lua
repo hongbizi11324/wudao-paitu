@@ -41,6 +41,7 @@ local CARDS_DIR = PROJECT_ROOT .. "/resources/cards"
 -- 内置的 .tres 文件列表（我们也可以让 Lua 自动扫描目录）
 -- 先用硬编码，后面再升级成自动扫描
 local card_files = {
+    -- 通用
     "strike.tres", "defend.tres", "bash.tres", "heal.tres",
     "meditate.tres", "punch.tres", "light_step.tres",
     "double_strike.tres", "triple_stab.tres",
@@ -56,9 +57,17 @@ local card_files = {
     "wd_taiji.tres", "wd_soft.tres", "wd_steps.tres",
     "wd_heavy.tres", "wd_twoway.tres",
     
-    -- 逍遥
+    -- 逍遥（基础5 + 云芷新卡25）
     "xy_beiming.tres", "xy_lingbo.tres", "xy_wuxiang.tres",
-    "xy_zhemel.tres", "xy_bahuang.tres"
+    "xy_zhemel.tres", "xy_bahuang.tres",
+    "xy_xiaoyaoyou.tres", "xy_xingluo.tres", "xy_fengjuan.tres",
+    "xy_guicang.tres", "xy_fuguang.tres", "xy_yufeng.tres",
+    "xy_duanliu.tres", "xy_wanxiang.tres", "xy_xiuli.tres",
+    "xy_lianhuan.tres", "xy_houfa.tres", "xy_jinghua.tres",
+    "xy_wujian.tres", "xy_xushi.tres", "xy_yixing.tres",
+    "xy_hantan.tres", "xy_qiguan.tres", "xy_tuna.tres",
+    "xy_longxiang.tres", "xy_baoyuan.tres", "xy_xixing.tres",
+    "xy_guanxing.tres", "xy_fange.tres", "xy_yibizhi.tres", "xy_duotian.tres"
 }
 
 -- 门派中文名映射
@@ -239,8 +248,8 @@ local function check_cost(card)
         return false
     end
     
-    if cost < 0 or cost > 3 then
-        add_error(card.card_id, "费用 " .. cost .. " 超出允许范围（0~3）")
+    if cost < 0 or cost > 4 then
+        add_error(card.card_id, "费用 " .. cost .. " 超出允许范围（0~4）")
         return false
     end
     

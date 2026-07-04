@@ -227,6 +227,14 @@ var all_card_pool = [
 	"sl_fist", "sl_iron", "sl_golden", "sl_arhat",
 	"wd_taiji", "wd_soft", "wd_steps", "wd_heavy",
 	"xy_beiming", "xy_lingbo", "xy_wuxiang", "xy_zhemel",
+	"xy_xiaoyaoyou", "xy_xingluo", "xy_fengjuan",
+	"xy_guicang", "xy_fuguang", "xy_yufeng",
+	"xy_duanliu", "xy_wanxiang", "xy_xiuli",
+	"xy_lianhuan", "xy_houfa", "xy_jinghua",
+	"xy_wujian", "xy_xushi", "xy_yixing",
+	"xy_hantan", "xy_qiguan", "xy_tuna",
+	"xy_longxiang", "xy_baoyuan", "xy_xixing",
+	"xy_guanxing", "xy_fange", "xy_yibizhi", "xy_duotian",
 	# ---- 门派核心（商店专用） ----
 	"sl_damo", "wd_twoway", "xy_bahuang"
 ]
@@ -266,11 +274,11 @@ func get_block_bonus() -> int:
 
 func get_punch_damage() -> int:
 	match current_realm:
-		0: return 2
-		1: return 4
-		2: return 5
-		3: return 6
-		_: return 8
+		0: return 5
+		1: return 6
+		2: return 7
+		3: return 8
+		_: return 10
 
 func get_meditate_gain() -> int:
 	match current_realm:

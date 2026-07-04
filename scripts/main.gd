@@ -1,8 +1,12 @@
 extends Node2D
 
-var draw_pile = []   # 牌库
-var discard_pile = [] # 弃牌堆
+var draw_pile = []      # 牌库（P1）
+var discard_pile = []    # 弃牌堆（P1）
+var draw_pile_p2 = []    # 牌库（P2，双人模式）
+var discard_pile_p2 = [] # 弃牌堆（P2，双人模式）
 var game_over = false
+
+var turn_manager: TurnManager  # 回合状态机
 
 @onready var hand1 = $Hand1
 @onready var hand2 = $Hand2
@@ -40,9 +44,15 @@ var game_over = false
 @onready var p2_name_label = $Player2NameLabel
 @onready var enemy_portrait = $EnemyPortrait
 
-var _active_player: int = 1  # 1=玩家1, 2=玩家2
-var _ready_p1: bool = false
-var _ready_p2: bool = false
+var _active_player: int = 1  # 1=玩家1, 2=玩家2（仅用于UI切换）
+
+# 云芷卡牌追踪变量
+var last_played_card_type: int = -1  # 上一张打出的卡牌类型
+var last_played_card_id: String = ""  # 上一张打出的卡牌ID
+var skill_played_this_turn: int = 0   # 本回合打出技能牌计数
+var energy_used_this_turn: int = 0    # 本回合已消耗内力
+var consecutive_discount_used: bool = false  # 虚实相生第二段折扣是否已用
+var next_two_cards_discount: int = 0  # 虚实相生下两张折扣数
 
 # 当前活跃玩家的别名（方便现有代码直接引用）
 var hand: Node2D
@@ -144,12 +154,8 @@ func _ready():
 	draw_pile.shuffle()
 	
 	if GameData.is_dual_mode:
-		var p2_draw = GameData.player2_deck.duplicate()
-		p2_draw.shuffle()
-		_switch_draw(hand2, p2_draw)
-	
-	_update_ui()
-	_switch_draw(hand1, draw_pile)
+		draw_pile_p2 = GameData.player2_deck.duplicate()
+		draw_pile_p2.shuffle()
 	
 	# 加载头像
 	if GameData.selected_character != "":
@@ -161,13 +167,70 @@ func _ready():
 	else:
 		p2_name_label.text = "玩家2"
 	
-	_switch_to(1)
-	if not GameData.is_dual_mode:
-		_update_turn_label("你的回合")
+	# 创建回合状态机
+	turn_manager = TurnManager.new()
+	turn_manager.name = "TurnManager"
+	add_child(turn_manager)
+	turn_manager.turn_started.connect(_on_turn_started)
+	
+	# 开始战斗（首次会触发 _on_turn_started(P1) → 统一抽牌）
+	turn_manager.start_battle(GameData.is_dual_mode)
+	
+	_update_ui()
 
 
 # ==============================
-# 牌库操作
+# 回合状态机回调
+# TurnManager 驱动，单/双人统一处理
+# ==============================
+
+func _on_turn_started(turn: int):
+	# 重置回合追踪变量
+	skill_played_this_turn = 0
+	energy_used_this_turn = 0
+	next_two_cards_discount = 0
+	consecutive_discount_used = false
+	
+	match turn:
+		TurnManager.Turn.PLAYER1:
+			_switch_to(1)
+			_switch_draw(hand1, draw_pile, discard_pile)
+			player1.refill_energy()
+			if GameData.is_dual_mode:
+				player2.refill_energy()
+			_trigger_power_effects()
+			end_turn_btn.text = "结束回合"
+			end_turn_btn.disabled = false
+			_update_ui()
+			_update_deck_ui()
+		
+		TurnManager.Turn.PLAYER2:
+			_switch_to(2)
+			_switch_draw(hand2, draw_pile_p2, discard_pile_p2)
+			player2.refill_energy()
+			end_turn_btn.text = "结束回合"
+			end_turn_btn.disabled = false
+			_update_ui()
+			_update_deck_ui()
+		
+		TurnManager.Turn.ENEMY:
+			end_turn_btn.disabled = true
+			end_turn_btn.text = "敌人回合..."
+			_update_turn_label("敌人回合")
+			# 延迟一帧执行，让 UI 先刷新
+			_execute_enemy_turn.call_deferred()
+
+
+func _execute_enemy_turn():
+	var alive = gm.execute_enemy_turn(player1, enemy)
+	if game_over:
+		return
+	if alive:
+		turn_manager.end_enemy_turn()
+
+
+# ==============================
+# 玩家操作别名（方便现有代码引用）
 # ==============================
 
 func _switch_to(p: int):
@@ -206,17 +269,21 @@ func _on_p2_portrait_clicked(event: InputEvent):
 		_switch_to(2)
 
 
-func _switch_draw(h: Node2D, pile: Array, count: int = 4):
-	"""给指定手牌抽指定数量牌，牌库空则回收弃牌堆"""
+# ==============================
+# 牌库操作
+# ==============================
+
+func _switch_draw(h: Node2D, pile: Array, discard_ref: Array, count: int = 4):
+	"""给指定手牌抽指定数量牌，牌库空则回收对应的弃牌堆"""
 	var card_scene = load("res://scenes/card.tscn")
 	for i in range(count):
 		if pile.size() == 0:
-			if discard_pile.size() > 0:
+			if discard_ref.size() > 0:
 				# 回收弃牌堆到牌库
-				draw_pile = discard_pile.duplicate()
-				draw_pile.shuffle()
-				discard_pile.clear()
-				pile = draw_pile
+				for cid in discard_ref:
+					pile.append(cid)
+				discard_ref.clear()
+				pile.shuffle()
 			else:
 				break
 		var card_id = pile.pop_back()
@@ -248,17 +315,35 @@ func _on_card_played(card):
 	
 	# ===== 费用（凌波微步折扣） =====
 	var actual_cost = data.cost
+	# 逍遥游：攻击/内力牌费用-1
+	if player.attack_discounted and (data.card_type == CardData.CardType.ATTACK or data.card_type == CardData.CardType.INNER):
+		actual_cost = max(0, actual_cost - 1)
+	# 凌波微步折扣
 	if player.next_card_discount > 0:
-		actual_cost = max(0, data.cost - player.next_card_discount)
+		actual_cost = max(0, actual_cost - player.next_card_discount)
 		player.next_card_discount = 0
+	# 虚实相生折扣
+	if next_two_cards_discount > 0:
+		var dc = mini(actual_cost, next_two_cards_discount)
+		actual_cost -= dc
+		next_two_cards_discount -= dc
+		consecutive_discount_used = true
 	if not player.spend_energy(actual_cost):
 		return
+	energy_used_this_turn += actual_cost
+	
+	# 追踪上一张牌
+	last_played_card_type = data.card_type
+	last_played_card_id = data.card_id
+	if data.card_type == CardData.CardType.SKILL:
+		skill_played_this_turn += 1
 	
 	# ===== 效果计算 =====
 	var times = max(1, data.repeat)
-	var dmg = 0
-	var blk = 0
-	var eg = 0
+	# 基础值统一从 .tres 读取（含境界加成），match分支只处理特殊逻辑
+	var dmg = data.damage + GameData.get_damage_bonus()
+	var blk = data.block + GameData.get_block_bonus()
+	var eg = data.energy_gain
 	var extra_draw = 0
 	var is_consumed = false  # true=POWER/小无相功 不进弃牌
 	
@@ -269,21 +354,19 @@ func _on_card_played(card):
 		"meditate":
 			eg = GameData.get_meditate_gain()
 		
-		# ---- 🏯 少林 ----
+		# ---- 🏯 少林（chan 特殊效果追加，基础值来自 .tres） ----
 		"sl_fist":
-			dmg = 4
 			player.chan += 1
 			print("罗汉拳 禅意+1 (%d)" % player.chan)
 		"sl_iron":
-			blk = 6
 			player.chan += 1
 			print("铁布衫 禅意+1 (%d)" % player.chan)
 		"sl_golden":
-			blk = 8 + player.chan * 3
+			blk += player.chan * 3
 			print("金钟罩 消耗%d层禅意 → 格挡%d" % [player.chan, blk])
 			player.chan = 0
 		"sl_arhat":
-			dmg = 6 + player.chan * 4
+			dmg += player.chan * 4
 			print("罗汉伏魔 消耗%d层禅意 → 伤害%d" % [player.chan, dmg])
 			player.chan = 0
 		"sl_damo":
@@ -291,19 +374,16 @@ func _on_card_played(card):
 			is_consumed = true
 			print("达摩一苇 激活！")
 		
-		# ---- ☯️ 武当 ----
+		# ---- ☯️ 武当（jianyi 特殊效果追加，基础值来自 .tres） ----
 		"wd_taiji":
-			blk = 4
 			player.jianyi += 1
 			print("太极拳 剑意+1 (%d)" % player.jianyi)
 		"wd_soft":
-			dmg = 5
 			if player.jianyi > 0:
 				dmg += 4
 				player.jianyi -= 1
 				print("柔云剑 消耗1剑意 → 伤害%d" % dmg)
 		"wd_steps":
-			blk = 6
 			if player.jianyi > 0:
 				extra_draw = 1
 				player.jianyi -= 1
@@ -318,12 +398,10 @@ func _on_card_played(card):
 			is_consumed = true
 			print("太极两仪 激活！")
 		
-		# ---- 🦋 逍遥 ----
+		# ---- 🦋 逍遥（基础值来自 .tres，match只做特殊效果） ----
 		"xy_beiming":
-			dmg = 4
-			# heal 直接用 data.heal = 2
+			pass  # heal 直接用 data.heal = 2
 		"xy_lingbo":
-			blk = 6
 			player.next_card_discount = 1
 			print("凌波微步 下张牌费用-1")
 		"xy_wuxiang":
@@ -346,7 +424,6 @@ func _on_card_played(card):
 			else:
 				print("小无相功 弃牌堆无牌可复制")
 		"xy_zhemel":
-			dmg = 7
 			if hand.cards.size() <= 3:
 				dmg = 12
 				print("天山折梅手 手牌≤3 → 伤害12")
@@ -355,10 +432,190 @@ func _on_card_played(card):
 			is_consumed = true
 			print("八荒六合 激活！")
 		
-		# ---- 默认：通用卡牌（用数据值+境界加成） ----
+		# ---- 🦋 云芷新卡（基础值来自 .tres，match只做条件追加） ----
+		
+		"xy_xiaoyaoyou":
+			player.power_xiaoyaoyou = true
+			is_consumed = true
+			print("逍遥游 激活！")
+		
+		"xy_xingluo":
+			if hand.cards.size() >= 6:
+				dmg += 5
+				print("星落九天 手牌≥6 → 伤害%d" % dmg)
+		
+		"xy_fengjuan":
+			dmg += mini(hand.cards.size(), 4)
+			print("风卷残云 手牌%d张 → 伤害%d" % [hand.cards.size(), dmg])
+		
+		"xy_guicang":
+			extra_draw = 2
+			if hand.cards.size() >= 5:
+				extra_draw = 3
+				print("归藏于渊 手牌≥5 → 抽3")
+		
+		"xy_fuguang":
+			extra_draw = 1
+			if hand.cards.size() <= 3:
+				extra_draw = 2
+				print("浮光掠影 手牌≤3 → 抽2")
+		
+		"xy_yufeng":
+			if hand.cards.size() >= 4:
+				blk += 4
+				print("御风而行 手牌≥4 → 格挡%d" % blk)
+		
+		"xy_duanliu":
+			# 弃1张牌，伤害+3
+			var to_discard = null
+			for c in hand.cards:
+				if c != card:
+					to_discard = c
+					break
+			if to_discard != null:
+				dmg += 3
+				var dc = discard_pile_p2 if _active_player == 2 else discard_pile
+				dc.append(to_discard.card_data.card_id)
+				hand.remove_card(to_discard)
+				to_discard.queue_free()
+				print("断水流 弃牌→伤害%d" % dmg)
+		
+		"xy_wanxiang":
+			dmg = hand.cards.size() * 3
+			print("万象归一 手牌%d张 → 伤害%d" % [hand.cards.size(), dmg])
+			# 弃掉所有手牌
+			var dc = discard_pile_p2 if _active_player == 2 else discard_pile
+			for c in hand.cards.duplicate():
+				if c != card:
+					dc.append(c.card_data.card_id)
+					hand.remove_card(c)
+					c.queue_free()
+		
+		"xy_xiuli":
+			# 将1张手牌移至牌顶。若移除的是攻击牌，抽1张
+			var to_move = null
+			for c in hand.cards:
+				if c != card:
+					to_move = c
+					break
+			if to_move != null:
+				var dp = draw_pile_p2 if _active_player == 2 else draw_pile
+				dp.append(to_move.card_data.card_id)
+				var is_attack = to_move.card_data.card_type == CardData.CardType.ATTACK
+				hand.remove_card(to_move)
+				to_move.queue_free()
+				if is_attack:
+					extra_draw += 1
+					print("袖里乾坤 移走攻击牌 → 抽1")
+		
+		"xy_lianhuan":
+			blk = skill_played_this_turn * 2
+			print("连环计 本回合打出%d张技能 → 格挡%d" % [skill_played_this_turn, blk])
+		
+		"xy_houfa":
+			if last_played_card_type == CardData.CardType.ATTACK:
+				blk = 8
+				extra_draw = 1
+				print("后发制人 上张是攻击 → 格挡8, 抽1")
+		
+		"xy_jinghua":
+			if last_played_card_id != "" and last_played_card_id != "xy_jinghua":
+				var last_path = "res://resources/cards/%s.tres" % last_played_card_id
+				var last_data = load(last_path)
+				if last_data and last_data.card_type != CardData.CardType.POWER:
+					var cscene = load("res://scenes/card.tscn")
+					var new_card = cscene.instantiate()
+					new_card.setup(last_data)
+					hand.add_card(new_card)
+					print("镜花水月 复制 -> %s" % last_played_card_id)
+				else:
+					print("镜花水月 上一张是POWER/无效，跳过")
+			else:
+				print("镜花水月 无上一张牌，跳过")
+		
+		"xy_wujian":
+			if last_played_card_type == CardData.CardType.SKILL:
+				dmg *= 2
+				print("无间道 上张是技能 → 伤害%d" % dmg)
+		
+		"xy_xushi":
+			next_two_cards_discount = 2
+			if consecutive_discount_used:
+				next_two_cards_discount = 3
+				print("虚实相生 连续技能 → 下3减")
+			else:
+				print("虚实相生 下2减")
+		
+		"xy_yixing":
+			extra_draw = 1
+			if last_played_card_type == CardData.CardType.MOVEMENT:
+				extra_draw = 2
+				print("移形换影 上张是移动 → 抽2")
+		
+		"xy_hantan":
+			eg = 1
+			if player.energy >= player.max_energy - 1:
+				eg = 2
+				print("寒潭映月 满内力 → 得2内力")
+		
+		"xy_qiguan":
+			if player.energy >= 2:
+				player.energy -= 2
+				energy_used_this_turn += 2
+				player.energy_changed.emit(player.energy, player.max_energy)
+				dmg += 6
+				print("气贯长虹 额外+2内力 → 伤害%d" % dmg)
+		
+		"xy_tuna":
+			eg = 2
+			if energy_used_this_turn <= actual_cost:
+				eg = 3
+				print("吐纳归元 未额外消耗内力 → 回3内力")
+		
+		"xy_longxiang":
+			player.power_longxiang = true
+			is_consumed = true
+			print("龙象般若 激活！")
+		
+		"xy_baoyuan":
+			if energy_used_this_turn == 0:
+				blk += 5
+				print("抱元守一 未消耗内力 → 格挡%d" % blk)
+		
+		"xy_xixing":
+			if enemy.block > 0:
+				dmg += 5
+				player.heal(dmg)
+				print("吸星大法 敌有护盾 → 伤害%d, 回%dHP" % [dmg, dmg])
+		
+		"xy_guanxing":
+			if enemy.intent_type == enemy.IntentType.DEFEND:
+				blk = 6
+				print("观星望斗 敌人防御 → 格挡6")
+		
+		"xy_fange":
+			if enemy.intent_type == enemy.IntentType.ATTACK:
+				dmg = 16
+				print("反戈一击 敌人攻击 → 伤害%d" % dmg)
+		
+		"xy_yibizhi":
+			blk = enemy.intent_value
+			print("以彼之道 复制%d点格挡" % blk)
+		
+		"xy_duotian":
+			if float(enemy.hp) / float(enemy.max_hp) < 0.3:
+				dmg = 30
+				print("夺天造化 敌人血量<30%% → 伤害%d" % dmg)
+		
+		# ---- 通用基础卡：已通过顶部的 dmg/blk/eg 从 .tres 赋值 ----
 		_:
-			dmg = data.damage + GameData.get_damage_bonus()
-			blk = data.block + GameData.get_block_bonus()
+			pass
+	
+	# 🦋 龙象般若：未使用内力提供伤害加成
+	if player.power_longxiang and dmg > 0:
+		var bonus = player.energy * 2
+		dmg += bonus
+		print("龙象般若 未用内力%d → 伤害+%d" % [player.energy, bonus])
 	
 	# ===== 执行伤害/格挡/回血 =====
 	for i in range(times):
@@ -374,11 +631,14 @@ func _on_card_played(card):
 	
 	# ===== 抽牌 =====
 	if data.draw + extra_draw > 0:
-		_switch_draw(hand, draw_pile, data.draw + extra_draw)
+		var dp = draw_pile_p2 if _active_player == 2 else draw_pile
+		var dc = discard_pile_p2 if _active_player == 2 else discard_pile
+		_switch_draw(hand, dp, dc, data.draw + extra_draw)
 	
 	# ===== 弃牌/消耗 =====
 	if not is_consumed:
-		discard_pile.append(card.card_data.card_id)
+		var dc = discard_pile_p2 if _active_player == 2 else discard_pile
+		dc.append(card.card_data.card_id)
 	
 	hand.remove_card(card)
 	card.queue_free()
@@ -390,72 +650,28 @@ func _on_card_played(card):
 
 
 # ==============================
-# 回合管理
+# 结束回合
+# 统一逻辑：弃手牌 → 通知 TurnManager 推进
 # ==============================
 
 func _on_end_turn():
-	if game_over:
+	if game_over or turn_manager.current_turn == TurnManager.Turn.ENEMY:
 		return
 	
 	if hand.selected_card != null:
 		hand.deselect()
 	
-	# ── 单人模式：直接结束 ──
-	if not GameData.is_dual_mode:
-		for c in hand.cards.duplicate():
-			if c.card_data.retain:
-				continue
-			discard_pile.append(c.card_data.card_id)
-			hand.remove_card(c)
-			c.queue_free()
-		end_turn_btn.disabled = true
-		turn_label.text = "敌人回合"
-		gm.start_enemy_turn(player1, enemy)
-		if game_over:
-			return
-		_switch_draw(hand1, draw_pile)
-		_trigger_power_effects()
-		_update_ui()
-		end_turn_btn.disabled = false
-		return
-	
-	# ── 双人模式 ──
-	if _active_player == 1:
-		_ready_p1 = true
-	else:
-		_ready_p2 = true
-	
-	var ready_hand = hand
-	for c in ready_hand.cards.duplicate():
+	# 弃当前手牌（不含保留）
+	var my_discard = discard_pile_p2 if _active_player == 2 else discard_pile
+	for c in hand.cards.duplicate():
 		if c.card_data.retain:
 			continue
-		discard_pile.append(c.card_data.card_id)
-		ready_hand.remove_card(c)
+		my_discard.append(c.card_data.card_id)
+		hand.remove_card(c)
 		c.queue_free()
-	end_turn_btn.text = "等待玩家%d" % (2 if _active_player == 1 else 1)
-	_switch_to(2 if _active_player == 1 else 1)
 	
-	if _ready_p1 and _ready_p2:
-		_ready_p1 = false
-		_ready_p2 = false
-		end_turn_btn.disabled = true
-		end_turn_btn.text = "敌人回合..."
-		turn_label.text = "敌人回合"
-		for c in hand.cards.duplicate():
-			if c.card_data.retain:
-				continue
-			discard_pile.append(c.card_data.card_id)
-			hand.remove_card(c)
-			c.queue_free()
-		gm.start_enemy_turn(player1, enemy)
-		if game_over:
-			return
-		_switch_draw(hand1, draw_pile)
-		_switch_draw(hand2, draw_pile)
-		_trigger_power_effects()
-		_switch_to(1)
-		end_turn_btn.disabled = false
-		_update_ui()
+	# 通知 TurnManager → 走状态机切换
+	turn_manager.end_player_turn()
 
 
 # ==============================
@@ -488,6 +704,15 @@ func _trigger_power_effects():
 		else:
 			card.queue_free()
 			discard_pile.append(card_id)
+	
+	# 🦋 逍遥游：手牌上限+2，攻击/内力牌费用-1（通过标记实现，不修改卡面数据）
+	if player.power_xiaoyaoyou:
+		player.hand_limit_mod = 2
+		player.attack_discounted = true
+		print("逍遥游：手牌上限+2，攻击/内力牌费用-1")
+	
+	# 🦋 龙象般若：伤害加成已在 _on_card_played 计算
+	# 纯标记，每次攻击时生效
 
 
 # ==============================
@@ -513,9 +738,16 @@ func _on_battle_end(won):
 			# ---- 门派卡 ----
 			"sl_fist", "sl_iron", "sl_golden", "sl_arhat",
 			"wd_taiji", "wd_soft", "wd_steps", "wd_heavy",
-			"xy_beiming", "xy_lingbo", "xy_wuxiang", "xy_zhemel"
+			"xy_beiming", "xy_lingbo", "xy_wuxiang", "xy_zhemel",
+			"xy_xiaoyaoyou", "xy_xingluo", "xy_fengjuan",
+			"xy_guicang", "xy_fuguang", "xy_yufeng",
+			"xy_duanliu", "xy_wanxiang", "xy_xiuli",
+			"xy_lianhuan", "xy_houfa", "xy_jinghua",
+			"xy_wujian", "xy_xushi", "xy_yixing",
+			"xy_hantan", "xy_qiguan", "xy_tuna",
+			"xy_longxiang", "xy_baoyuan", "xy_xixing",
+			"xy_guanxing", "xy_fange", "xy_yibizhi", "xy_duotian"
 		]
-		# POWER卡（达摩一苇/太极两仪/八荒六合）不出现在奖励池，商店才能买
 		pool.shuffle()
 		var options = pool.slice(0, 3)
 		reward_screen.open(options)
@@ -541,12 +773,21 @@ func _on_retry():
 	menu_btn.visible = false
 	player.init()
 	_start_battle()
-	# shuffle handled in _on_retry
-	hand.clear()
-	_update_ui()
-	_switch_draw(hand1, draw_pile, 4)
-	_update_turn_label("你的回合")
-	_update_deck_ui()
+	# 重置牌组
+	draw_pile = GameData.player_deck.duplicate()
+	draw_pile.shuffle()
+	discard_pile.clear()
+	if GameData.is_dual_mode:
+		draw_pile_p2 = GameData.player2_deck.duplicate()
+		draw_pile_p2.shuffle()
+		discard_pile_p2.clear()
+		hand1.clear()
+		hand2.clear()
+	else:
+		hand.clear()
+	
+	# 重启回合管理器（自动触发 P1 抽牌）
+	turn_manager.start_battle(GameData.is_dual_mode)
 
 
 func _on_back_to_menu():
@@ -570,7 +811,6 @@ func _on_reward_skipped():
 
 func _show_map():
 	# 显示杀戮尖塔风格地图
-	# 如果当前大关已完成（打完Boss），生成新的大关
 	if GameData.is_map_complete():
 		GameData.generate_new_act()
 	node_map.open()
@@ -587,15 +827,12 @@ func _on_node_selected(node_type: int):
 			get_tree().reload_current_scene()
 		
 		GameData.NodeType.SHOP:
-			# 商店
 			_open_shop()
 		
 		GameData.NodeType.REST:
-			# 休息点
 			$RestScreen.open()
 		
 		GameData.NodeType.EVENT:
-			# 随机事件
 			var event_data = GameData.get_random_event()
 			$EventScreen.open(event_data)
 
@@ -688,8 +925,14 @@ func _update_sect_ui():
 	jianyi_icon.visible = player.jianyi > 0
 
 func _update_deck_ui():
-	deck_label.text = "牌库 %d" % draw_pile.size()
-	discard_label.text = "弃牌 %d" % discard_pile.size()
+	if GameData.is_dual_mode:
+		var dp = draw_pile_p2 if _active_player == 2 else draw_pile
+		var dc = discard_pile_p2 if _active_player == 2 else discard_pile
+		deck_label.text = "牌库 %d" % dp.size()
+		discard_label.text = "弃牌 %d" % dc.size()
+	else:
+		deck_label.text = "牌库 %d" % draw_pile.size()
+		discard_label.text = "弃牌 %d" % discard_pile.size()
 
 func _on_energy_changed(cur, max_val):
 	energy_label.text = "内力 %d/%d" % [cur, max_val]
@@ -727,7 +970,8 @@ func _on_deck_label_clicked(event: InputEvent):
 	and event.pressed \
 	and event.button_index == MOUSE_BUTTON_LEFT:
 		get_viewport().set_input_as_handled()
-		var shuffled = draw_pile.duplicate()
+		var dp = draw_pile_p2 if _active_player == 2 else draw_pile
+		var shuffled = dp.duplicate()
 		shuffled.shuffle()
 		pile_viewer.open(shuffled, "牌库")
 
@@ -737,7 +981,8 @@ func _on_discard_label_clicked(event: InputEvent):
 	and event.pressed \
 	and event.button_index == MOUSE_BUTTON_LEFT:
 		get_viewport().set_input_as_handled()
-		pile_viewer.open(discard_pile, "弃牌堆")
+		var dc = discard_pile_p2 if _active_player == 2 else discard_pile
+		pile_viewer.open(dc, "弃牌堆")
 
 
 # ==============================

@@ -4,13 +4,13 @@
 
 [resource]
 script = ExtResource("1")
-card_id = "xy_lingbo"
-card_name = "凌波微步"
-card_type = 1
-cost = 1
-description = "获得6点格挡。本回合下一张牌费用-1"
-damage = 0
-block = 6
+card_id = "xy_fange"
+card_name = "反戈一击"
+card_type = 0
+cost = 3
+description = "造成8点伤害。若敌人下回合意图是攻击，伤害翻倍"
+damage = 8
+block = 0
 heal = 0
 draw = 0
 energy_gain = 0

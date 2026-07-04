@@ -4,13 +4,13 @@
 
 [resource]
 script = ExtResource("1")
-card_id = "xy_lingbo"
-card_name = "凌波微步"
-card_type = 1
-cost = 1
-description = "获得6点格挡。本回合下一张牌费用-1"
-damage = 0
-block = 6
+card_id = "xy_xixing"
+card_name = "吸星大法"
+card_type = 0
+cost = 2
+description = "造成5点伤害。若敌人有护盾，伤害+5，并回复等量生命"
+damage = 5
+block = 0
 heal = 0
 draw = 0
 energy_gain = 0

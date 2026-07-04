@@ -8,5 +8,5 @@ card_id = "punch"
 card_name = "普通拳脚"
 card_type = 0
 cost = 1
-description = "造成2点伤害"
-damage = 2
+description = "造成5点伤害"
+damage = 5

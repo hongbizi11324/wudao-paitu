@@ -4,14 +4,14 @@
 
 [resource]
 script = ExtResource("1")
-card_id = "xy_lingbo"
-card_name = "凌波微步"
-card_type = 1
+card_id = "xy_tuna"
+card_name = "吐纳归元"
+card_type = 3
 cost = 1
-description = "获得6点格挡。本回合下一张牌费用-1"
+description = "回复2点内力。若未使用完本回合内力，额外回复1点"
 damage = 0
-block = 6
+block = 0
 heal = 0
 draw = 0
-energy_gain = 0
+energy_gain = 2
 school = "xiaoyao"

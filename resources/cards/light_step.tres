@@ -8,5 +8,5 @@ card_id = "light_step"
 card_name = "轻身术"
 card_type = 4
 cost = 1
-description = "抽1张牌"
-draw = 1
+description = "抽2张牌"
+draw = 2

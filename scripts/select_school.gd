@@ -115,7 +115,10 @@ func show_hero(index: int):
 	$InfoPanel/PassiveDesc.text = passive_descs.get(hid, "待定")
 	$InfoPanel/StoryDesc.text = story_texts.get(hid, "")
 	
-	GameData.selected_character = hid
+	# 🐛 双人模式：仅 P1 选人时写 GameData.selected_character
+	# _pick_count == 0 表示 P1 正在选，>=1 表示 P2 选择阶段
+	if _pick_count == 0:
+		GameData.selected_character = hid
 
 
 # ==============================

@@ -32,6 +32,12 @@ var next_card_discount: int = 0
 # 太极两仪：首次受击标记（每回合重置）
 var first_hit_this_turn: bool = true
 
+# ========== 云芷专用 ==========
+var power_longxiang: bool = false    # 龙象般若激活
+var power_xiaoyaoyou: bool = false   # 逍遥游激活
+var attack_discounted: bool = false  # 逍遥游：本回合攻击牌已打折
+var hand_limit_mod: int = 0         # 手牌上限调整（逍遥游）
+
 signal energy_changed(current, max_val)
 signal hp_changed(current, max_val)
 signal block_changed(current)
@@ -48,6 +54,11 @@ func init(use_p2_hp: bool = false):
 	power_bahuang = false
 	next_card_discount = 0
 	first_hit_this_turn = true
+	# 云芷重置
+	power_longxiang = false
+	power_xiaoyaoyou = false
+	attack_discounted = false
+	hand_limit_mod = 0
 	
 	# 从 GameData 读取跨战斗血量
 	if use_p2_hp:
