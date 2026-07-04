@@ -44,10 +44,11 @@ theme_override_font_sizes/font_size = 16
 text = "测试模式"
 
 [node name="ContinueBtn" type="Button" parent="." unique_id=1212220747]
-offset_left = 560.0
-offset_top = 500.0
-offset_right = 720.0
-offset_bottom = 545.0
+offset_left = 16.0
+offset_top = 553.0
+offset_right = 176.0
+offset_bottom = 598.0
+scale = Vector2(1.2064043, 1.152897)
 theme_override_colors/font_color = Color(0.2, 0.8, 0.4, 1)
 theme_override_font_sizes/font_size = 18
 text = "▶ 继续游戏"

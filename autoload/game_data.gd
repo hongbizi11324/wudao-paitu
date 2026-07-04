@@ -295,6 +295,20 @@ const BUY_PRICE: int = 10
 const DELETE_PRICE: int = 6
 
 
+# ==============================
+# 新游戏初始化（完整重置所有持久状态）
+# ==============================
+
+func _reset_map_state():
+	map_active = false
+	map_act_count = -1
+	map_layers = []
+	map_connections = []
+	map_node_states = []
+	map_current_offset = 0
+	loading_save = false
+
+
 func new_run():
 	current_floor = 1
 	current_realm = 0
@@ -306,37 +320,28 @@ func new_run():
 	player_hp = 60
 	player_max_hp = 60
 	selected_character = ""
-	map_active = false
-	loading_save = false
+	selected_character_2 = ""
+	player2_hp = 60
+	player2_max_hp = 60
+	player2_deck = []
+	player2_realm = 0
+	_reset_map_state()
 	print("【新局】第1层·淬体境起步，牌组 %d 张" % player_deck.size())
 
 
 func new_run_custom(deck: Array):
-	current_floor = 1
-	current_realm = 0
-	cultivation = 0
-	cultivation_to_next = 20
+	new_run()
 	gold = 999
-	max_energy_per_realm = 3
 	player_deck = deck.duplicate()
-	player_hp = 60
-	player_max_hp = 60
-	map_active = false
-	loading_save = false
 	print("【测试】第1层·自定义牌组 %d 张" % player_deck.size())
 
 
 # ---------- 双人模式函数 ----------
 
 func new_dual_run():
-	current_floor = 1
-	current_realm = 0
-	cultivation = 0
-	cultivation_to_next = 20
+	new_run()
 	gold = 20
-	max_energy_per_realm = 3
-	map_active = false
-	loading_save = false
+	player_deck = starter_deck.duplicate()
 	
 	# 玩家1初始化
 	player_deck = starter_deck.duplicate()
