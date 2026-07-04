@@ -223,15 +223,18 @@ func sync_select_node(node_type: int):
 # 主机选完角色，同步角色和牌组给客机
 @rpc("authority", "reliable")
 func sync_start_game(p1_char: String, p2_char: String, p1_deck: Array, p2_deck: Array):
+	# 先重置所有数据（new_dual_run 会覆盖 deck 所以后设）
+	GameData.new_dual_run()
+	# 再覆盖成主机发来的数据
 	GameData.selected_character = p1_char
 	GameData.selected_character_2 = p2_char
-	GameData.player_deck = p1_deck
-	GameData.player2_deck = p2_deck
+	GameData.player_deck = p1_deck.duplicate()
+	GameData.player2_deck = p2_deck.duplicate()
 	game_start_ready.emit()
 
 
 # 主机通知客机：回合变了，执行对应阶段的动作
-@rpc("authority", "call_local", "reliable")
+@rpc("authority", "reliable")
 func sync_turn(turn_id: int):
 	var main = get_tree().current_scene
 	if not main or not main.has_method("network_sync_turn"):

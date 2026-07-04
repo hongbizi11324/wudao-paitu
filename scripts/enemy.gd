@@ -38,6 +38,8 @@ func init(hp_val: int = 25):
 # 新版：根据楼层和类型初始化
 func init_from_floor(_floor_num: int, ftype: FloorType):
 	_rng = RandomNumberGenerator.new()
+	# 用楼层+大关做种子，保证两边生成同一只敌人
+	_rng.set_seed(_floor_num * 1000 + max(0, GameData.map_act_count))
 	floor_type = ftype
 	var dmg_range = GameData.get_enemy_damage_range()
 	base_damage_min = dmg_range[0]
@@ -107,7 +109,7 @@ func execute_intent(_player: Node) -> bool:
 
 # 计算攻击伤害（考虑 Boss 多阶段加成）
 func _calc_attack_damage() -> int:
-	var base = randi_range(base_damage_min, base_damage_max)
+	var base = _rng.randi_range(base_damage_min, base_damage_max)
 	
 	if floor_type == FloorType.BOSS:
 		var hp_pct = float(hp) / float(max_hp)

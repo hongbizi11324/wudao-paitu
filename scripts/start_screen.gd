@@ -104,9 +104,8 @@ func _on_network_ready():
 
 
 func _on_game_start():
-	# 主机通知游戏开始
+	# 主机通知游戏开始（数据已由 sync_start_game 同步，不要再调 new_dual_run）
 	GameData.is_dual_mode = true
-	GameData.new_dual_run()
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 

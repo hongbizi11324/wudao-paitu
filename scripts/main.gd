@@ -206,6 +206,8 @@ func _ready():
 # TurnManager 驱动，单/双人统一处理
 # ==============================
 
+var _turn_sync_delayed: bool = false
+
 func _on_turn_started(turn: int):
 	# 重置回合追踪变量
 	skill_played_this_turn = 0
@@ -213,9 +215,16 @@ func _on_turn_started(turn: int):
 	next_two_cards_discount = 0
 	consecutive_discount_used = false
 	
-	# 局域网：主机同步给客机
+	# 局域网：主机同步给客机（首次延迟，等客机加载完）
 	if NetworkManager.is_lan and NetworkManager.is_host:
-		NetworkManager.rpc("sync_turn", turn)
+		if not _turn_sync_delayed:
+			_turn_sync_delayed = true
+			_apply_turn(turn)
+			await get_tree().create_timer(0.3).timeout
+			NetworkManager.rpc("sync_turn", turn)
+			return
+		else:
+			NetworkManager.rpc("sync_turn", turn)
 	
 	_apply_turn(turn)
 
