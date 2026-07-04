@@ -28,6 +28,9 @@ var _timeout_timer: Timer = null
 # ==============================
 
 func host_game(port: int = DEFAULT_PORT) -> bool:
+	if is_lan:
+		cleanup()
+	
 	var peer = ENetMultiplayerPeer.new()
 	var err = peer.create_server(port, MAX_PLAYERS)
 	if err != OK:
@@ -39,8 +42,10 @@ func host_game(port: int = DEFAULT_PORT) -> bool:
 	is_host = true
 	shared_seed = randi()
 	
-	multiplayer.peer_connected.connect(_on_peer_connected)
-	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	if not multiplayer.peer_connected.is_connected(_on_peer_connected):
+		multiplayer.peer_connected.connect(_on_peer_connected)
+	if not multiplayer.peer_disconnected.is_connected(_on_peer_disconnected):
+		multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	
 	print("[网络] 主机已开，种子=%d" % shared_seed)
 	return true
