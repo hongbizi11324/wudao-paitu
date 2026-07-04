@@ -331,9 +331,9 @@ func _on_card_played(card):
 	# 局域网模式：通过RPC同步（_skip_lan_rpc 防止重入）
 	if NetworkManager.is_lan and not _skip_lan_rpc:
 		if NetworkManager.is_host:
-			rpc("sync_play", card.card_data.card_id, _active_player)
+			NetworkManager.rpc("sync_play", card.card_data.card_id, _active_player)
 		else:
-			rpc_id(1, "sync_play", card.card_data.card_id, _active_player)
+			NetworkManager.rpc_id(1, "sync_play", card.card_data.card_id, _active_player)
 		return
 	
 	var data = card.card_data
@@ -686,9 +686,9 @@ func _on_end_turn():
 	# 局域网模式：通过RPC同步
 	if NetworkManager.is_lan and not _skip_lan_rpc:
 		if NetworkManager.is_host:
-			rpc("sync_end_turn", _active_player)
+			NetworkManager.rpc("sync_end_turn", _active_player)
 		else:
-			rpc_id(1, "sync_end_turn", _active_player)
+			NetworkManager.rpc_id(1, "sync_end_turn", _active_player)
 		return
 	
 	if hand.selected_card != null:
