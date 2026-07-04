@@ -35,7 +35,7 @@ var turn_manager: TurnManager  # 回合状态机
 @onready var rest_screen = $RestScreen
 @onready var event_screen = $EventScreen
 @onready var retry_btn = $RetryBtn
-@onready var menu_btn = $MenuBtn
+@onready var menu_btn = $MenuBtn  # 战斗中常显，点击回主菜单
 @onready var p1_portrait = $Player1Portrait
 @onready var p2_portrait = $Player2Portrait
 @onready var chan_icon = $ChanIcon
@@ -172,6 +172,12 @@ func _ready():
 		p2_name_label.text = GameData.character_data[GameData.selected_character_2]["name"]
 	else:
 		p2_name_label.text = "玩家2"
+	
+	# 设置退出按钮（角落常显）
+	menu_btn.text = "✕"
+	menu_btn.size = Vector2(36, 36)
+	menu_btn.position = Vector2(10, 10)
+	menu_btn.visible = true
 	
 	# 创建回合状态机
 	turn_manager = TurnManager.new()
@@ -760,7 +766,6 @@ func _on_battle_end(won):
 	else:
 		_update_turn_label("败北...")
 		retry_btn.visible = true
-		menu_btn.visible = true
 
 
 func _on_player_died():
@@ -776,7 +781,6 @@ func _on_retry():
 	game_over = false
 	end_turn_btn.disabled = false
 	retry_btn.visible = false
-	menu_btn.visible = false
 	player.init()
 	_start_battle()
 	# 重置牌组

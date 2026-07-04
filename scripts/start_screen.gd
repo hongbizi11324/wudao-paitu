@@ -22,14 +22,13 @@ func _ready():
 	_quit_orig_scale = $QuitBtn.scale
 	_update_music_btn()
 	
-	# 有存档则显示"继续游戏"按钮
-	if GameData.has_save():
-		_continue_btn = Button.new()
-		_continue_btn.text = "▶ 继续游戏"
-		_continue_btn.size = Vector2(160, 45)
-		_continue_btn.position = Vector2(560, 440)
-		_continue_btn.pressed.connect(_on_continue)
-		add_child(_continue_btn)
+	# "继续游戏"按钮（常显）
+	_continue_btn = Button.new()
+	_continue_btn.text = "▶ 继续游戏"
+	_continue_btn.size = Vector2(160, 45)
+	_continue_btn.position = Vector2(560, 440)
+	_continue_btn.pressed.connect(_on_continue)
+	add_child(_continue_btn)
 
 
 func _on_start_hover():
@@ -59,6 +58,19 @@ func _on_dual():
 
 
 func _on_continue():
+	if not GameData.has_save():
+		# 显示提示
+		var toast = Label.new()
+		toast.text = "没有旧存档"
+		toast.add_theme_font_size_override("font_size", 24)
+		toast.add_theme_color_override("font_color", Color(1, 0.8, 0.2))
+		toast.position = Vector2(540, 500)
+		add_child(toast)
+		var tw = create_tween()
+		tw.tween_property(toast, "modulate", Color(1,1,1,0), 1.5).set_delay(1.0)
+		tw.finished.connect(toast.queue_free)
+		return
+	
 	# 加载存档 → 进入主场景（自动恢复地图）
 	GameData.load_game()
 	GameData.is_dual_mode = false

@@ -114,6 +114,15 @@ func _build_ui():
 
 func open():
 	visible = true
+	
+	# 退出按钮（角落常显）
+	var back_btn = Button.new()
+	back_btn.text = "✕"
+	back_btn.size = Vector2(36, 36)
+	back_btn.position = Vector2(10, 10)
+	back_btn.pressed.connect(_on_back_to_menu)
+	add_child(back_btn)
+	
 	if not GameData.map_active:
 		GameData.generate_new_act()
 
@@ -337,3 +346,6 @@ func _draw_lines():
 				glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 				_map_content.add_child(glow)
 				break
+
+func _on_back_to_menu():
+	get_tree().change_scene_to_file("res://scenes/start_screen.tscn")
