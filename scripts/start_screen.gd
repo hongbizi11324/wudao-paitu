@@ -82,7 +82,6 @@ func _on_host():
 	if NetworkManager.host_game():
 		GameData.is_dual_mode = true
 		GameData.new_dual_run()
-		NetworkManager.waiting_for_p2 = true
 		get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 
