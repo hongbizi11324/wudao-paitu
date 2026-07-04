@@ -828,19 +828,23 @@ func load_game() -> bool:
 	return true
 
 
-# JSON 序列化会把整数变浮点，递归修复
+# JSON 序列化会把整数变浮点，递归修复所有层
 func _fix_int_fields(data) -> Array:
 	var result = []
 	for item in data:
-		if typeof(item) == TYPE_DICTIONARY:
+		var t = typeof(item)
+		if t == TYPE_DICTIONARY:
 			var fixed = {}
 			for k in item:
 				var v = item[k]
-				# 把纯粹的整数值转回 int
 				if typeof(v) == TYPE_FLOAT and v == floor(v):
 					v = int(v)
+				elif typeof(v) == TYPE_ARRAY:
+					v = _fix_int_fields(v)
 				fixed[k] = v
 			result.append(fixed)
+		elif t == TYPE_ARRAY:
+			result.append(_fix_int_fields(item))
 		else:
 			result.append(item)
 	return result
