@@ -24,6 +24,10 @@ func _ready():
 	
 	# "继续游戏"按钮
 	_continue_btn.pressed.connect(_on_continue)
+	
+	# 局域网按钮
+	$HostBtn.pressed.connect(_on_host)
+	$JoinBtn.pressed.connect(_on_join)
 
 
 func _on_start_hover():
@@ -71,6 +75,45 @@ func _on_continue():
 	GameData.is_dual_mode = false
 	GameData.loading_save = true
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
+
+
+func _on_host():
+	# 局域网主机
+	if NetworkManager.host_game():
+		GameData.is_dual_mode = true
+		GameData.new_dual_run()
+		get_tree().change_scene_to_file("res://scenes/select_school.tscn")
+
+
+func _on_join():
+	# 局域网加入
+	var ip = $IpEdit.text.strip_edges()
+	if ip.is_empty():
+		_toast("请输入主机IP地址")
+		return
+	if NetworkManager.join_game(ip):
+		# 连上后等种子同步
+		NetworkManager.game_ready.connect(_on_network_ready)
+		_toast("正在连接...")
+
+
+func _on_network_ready():
+	# 种子同步完成，进游戏
+	GameData.is_dual_mode = true
+	GameData.new_dual_run()
+	get_tree().change_scene_to_file("res://scenes/main.tscn")
+
+
+func _toast(msg: String):
+	var toast = Label.new()
+	toast.text = msg
+	toast.add_theme_font_size_override("font_size", 18)
+	toast.add_theme_color_override("font_color", Color(1, 0.8, 0.2))
+	toast.position = Vector2(500, 500)
+	add_child(toast)
+	var tw = create_tween()
+	tw.tween_property(toast, "modulate", Color(1,1,1,0), 1.5).set_delay(0.8)
+	tw.finished.connect(toast.queue_free)
 
 
 func _on_test():

@@ -5,6 +5,7 @@ var discard_pile = []    # 弃牌堆（P1）
 var draw_pile_p2 = []    # 牌库（P2，双人模式）
 var discard_pile_p2 = [] # 弃牌堆（P2，双人模式）
 var game_over = false
+var _skip_lan_rpc: bool = false  # RPC收到时跳过再次发送
 
 var turn_manager: TurnManager  # 回合状态机
 
@@ -156,6 +157,10 @@ func _ready():
 		hand1.visible = true
 	
 	# 牌组
+	# 局域网：用共享种子保证牌序一致
+	if NetworkManager.is_lan:
+		seed(NetworkManager.shared_seed)
+	
 	draw_pile = GameData.player_deck.duplicate()
 	draw_pile.shuffle()
 	
@@ -321,6 +326,14 @@ func _unhandled_input(event):
 
 func _on_card_played(card):
 	if game_over:
+		return
+	
+	# 局域网模式：通过RPC同步（_skip_lan_rpc 防止重入）
+	if NetworkManager.is_lan and not _skip_lan_rpc:
+		if NetworkManager.is_host:
+			rpc("sync_play", card.card_data.card_id, _active_player)
+		else:
+			rpc_id(1, "sync_play", card.card_data.card_id, _active_player)
 		return
 	
 	var data = card.card_data
@@ -670,6 +683,14 @@ func _on_end_turn():
 	if game_over or turn_manager.current_turn == TurnManager.Turn.ENEMY:
 		return
 	
+	# 局域网模式：通过RPC同步
+	if NetworkManager.is_lan and not _skip_lan_rpc:
+		if NetworkManager.is_host:
+			rpc("sync_end_turn", _active_player)
+		else:
+			rpc_id(1, "sync_end_turn", _active_player)
+		return
+	
 	if hand.selected_card != null:
 		hand.deselect()
 	
@@ -684,6 +705,35 @@ func _on_end_turn():
 	
 	# 通知 TurnManager → 走状态机切换
 	turn_manager.end_player_turn()
+
+
+# ==============================
+# 局域网 RPC 回调
+# NetworkManager.sync_play / sync_end_turn 调用这里
+# ==============================
+
+func network_execute_play(card_id: String, player_id: int):
+	"""执行远程玩家打出的牌"""
+	_skip_lan_rpc = true
+	var h = hand1 if player_id == 1 else hand2
+	# 临时切换 hand 别名，让 _on_card_played 能正确 remove_card
+	var saved_hand = hand
+	hand = h
+	for c in h.cards:
+		if c.card_data.card_id == card_id:
+			_on_card_played(c)
+			break
+	hand = saved_hand
+	_skip_lan_rpc = false
+
+
+func network_execute_end_turn(player_id: int):
+	"""执行远程玩家结束回合"""
+	_skip_lan_rpc = true
+	if player_id != _active_player:
+		_switch_to(player_id)
+	_on_end_turn()
+	_skip_lan_rpc = false
 
 
 # ==============================

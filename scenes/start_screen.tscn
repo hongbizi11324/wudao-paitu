@@ -53,6 +53,44 @@ theme_override_colors/font_color = Color(0.2, 0.8, 0.4, 1)
 theme_override_font_sizes/font_size = 18
 text = "▶ 继续游戏"
 
+[node name="LanLabel" type="Label" parent="." unique_id=1212220750]
+offset_left = 11.0
+offset_top = 530.0
+offset_right = 211.0
+offset_bottom = 555.0
+theme_override_colors/font_color = Color(0.5, 0.9, 0.7, 0.8)
+theme_override_font_sizes/font_size = 14
+text = "——  局域网联机  ——"
+horizontal_alignment = 1
+
+[node name="HostBtn" type="Button" parent="." unique_id=1212220755]
+offset_left = 11.0
+offset_top = 558.0
+offset_right = 211.0
+offset_bottom = 592.0
+theme_override_colors/font_color = Color(0.2, 0.9, 0.5, 1)
+theme_override_font_sizes/font_size = 16
+text = "🔥 局域网主机"
+
+[node name="IpEdit" type="LineEdit" parent="." unique_id=1212220760]
+offset_left = 11.0
+offset_top = 595.0
+offset_right = 211.0
+offset_bottom = 620.0
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_colors/background_color = Color(0.15, 0.15, 0.2, 1)
+theme_override_font_sizes/font_size = 14
+placeholder_text = "输入主机IP"
+
+[node name="JoinBtn" type="Button" parent="." unique_id=1212220765]
+offset_left = 11.0
+offset_top = 623.0
+offset_right = 211.0
+offset_bottom = 657.0
+theme_override_colors/font_color = Color(0.4, 0.7, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "🔌 加入"
+
 [node name="DualBtn" type="Button" parent="." unique_id=1212220746]
 offset_left = 11.0
 offset_top = 610.0
