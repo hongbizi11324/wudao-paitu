@@ -244,7 +244,7 @@ func _start_dual_run(school_p2: String):
 	
 	# 局域网：通知客机进游戏
 	if NetworkManager.is_lan and NetworkManager.is_host:
-		NetworkManager.rpc("sync_start_game")
+		NetworkManager.rpc("sync_start_game", GameData.selected_character, GameData.selected_character_2, GameData.player_deck.duplicate(), GameData.player2_deck.duplicate())
 	
 	# 玩家1的门派牌
 	match _p1_school:

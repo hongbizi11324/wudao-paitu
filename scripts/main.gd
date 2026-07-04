@@ -716,14 +716,16 @@ func network_execute_play(card_id: String, player_id: int):
 	"""执行远程玩家打出的牌"""
 	_skip_lan_rpc = true
 	var h = hand1 if player_id == 1 else hand2
-	# 临时切换 hand 别名，让 _on_card_played 能正确 remove_card
 	var saved_hand = hand
+	var saved_player = player
 	hand = h
+	player = player1 if player_id == 1 else player2
 	for c in h.cards:
 		if c.card_data.card_id == card_id:
 			_on_card_played(c)
 			break
 	hand = saved_hand
+	player = saved_player
 	_skip_lan_rpc = false
 
 

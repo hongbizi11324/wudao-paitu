@@ -186,7 +186,11 @@ func sync_select_node(node_type: int):
 		main.network_select_node(node_type)
 
 
-# 主机选完角色，通知客机进游戏
+# 主机选完角色，同步角色和牌组给客机
 @rpc("authority", "reliable")
-func sync_start_game():
+func sync_start_game(p1_char: String, p2_char: String, p1_deck: Array, p2_deck: Array):
+	GameData.selected_character = p1_char
+	GameData.selected_character_2 = p2_char
+	GameData.player_deck = p1_deck
+	GameData.player2_deck = p2_deck
 	game_start_ready.emit()
