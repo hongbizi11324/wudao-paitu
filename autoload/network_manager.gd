@@ -12,7 +12,8 @@ var is_host: bool = false     # 是否是主机（服务器）
 var shared_seed: int = 0      # 共享随机种子
 var p2_peer_id: int = 0       # P2的连接ID（主机端用）
 
-signal game_ready()           # 种子同步完毕，可以进游戏了
+signal game_ready()           # 种子同步完毕
+signal game_start_ready()     # 主机通知客机：选完角色了，可以进游戏了
 
 
 # ---- 主机：开房间 ----
@@ -111,3 +112,9 @@ func sync_select_node(node_type: int):
 	var main = get_tree().current_scene
 	if main and main.has_method("network_select_node"):
 		main.network_select_node(node_type)
+
+
+# 主机选完角色了，通知客机进游戏
+@rpc("authority", "reliable")
+func sync_start_game():
+	game_start_ready.emit()

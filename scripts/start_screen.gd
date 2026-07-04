@@ -78,11 +78,11 @@ func _on_continue():
 
 
 func _on_host():
-	# 局域网主机
+	# 局域网主机：先进选人界面
 	if NetworkManager.host_game():
 		GameData.is_dual_mode = true
 		GameData.new_dual_run()
-		get_tree().change_scene_to_file("res://scenes/main.tscn")
+		get_tree().change_scene_to_file("res://scenes/select_school.tscn")
 
 
 func _on_join():
@@ -97,7 +97,13 @@ func _on_join():
 
 
 func _on_network_ready():
-	# 种子同步完成，进游戏
+	# 种子同步完成，等待主机通知开始
+	_toast("已连接，等待主机选择角色...")
+	NetworkManager.game_start_ready.connect(_on_game_start)
+
+
+func _on_game_start():
+	# 主机通知游戏开始
 	GameData.is_dual_mode = true
 	GameData.new_dual_run()
 	get_tree().change_scene_to_file("res://scenes/main.tscn")

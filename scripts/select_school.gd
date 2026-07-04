@@ -242,6 +242,10 @@ func _start_dual_run(school_p2: String):
 	"""双人：两人都选完，开战"""
 	GameData.new_dual_run()
 	
+	# 局域网：通知客机进游戏
+	if NetworkManager.is_lan and NetworkManager.is_host:
+		NetworkManager.rpc("sync_start_game")
+	
 	# 玩家1的门派牌
 	match _p1_school:
 		"shaolin":
