@@ -362,6 +362,8 @@ func _on_card_played(card):
 			NetworkManager.rpc_id(1, "request_play", card.card_data.card_id, _active_player)
 			return
 		_execute_card(card)
+	var _caller = "主机" if NetworkManager.is_host else "客机" if NetworkManager.is_lan else "单机"
+	print("[%s] P%d 出牌: %s" % [_caller, _active_player, card.card_data.card_id])
 		NetworkManager.rpc("sync_play", card.card_data.card_id, _active_player)
 		return
 	
@@ -780,6 +782,7 @@ var _waiting_mask: ColorRect = null
 
 
 func apply_snapshot(snap: Dictionary):
+	print("[客机] 收到快照: turn=%d p1_hand=%d p2_hand=%d" % [snap.get("turn", -1), snap.get("p1_hand_ids", []).size(), snap.get("p2_hand_ids", []).size()])
 	"""客机收到主机快照后更新UI"""
 	# 回合显示
 	match snap["turn"]:

@@ -255,6 +255,7 @@ func push_snapshot():
 	if not main.has_method("apply_snapshot"):
 		return
 	var snap = GameStateSync.build_snapshot(main)
+	print("[主机] 推送快照: turn=%d p1_hand=%d p2_hand=%d" % [snap.get("turn", -1), snap.get("p1_hand_ids", []).size(), snap.get("p2_hand_ids", []).size()])
 	rpc("sync_game_state", snap)
 
 
