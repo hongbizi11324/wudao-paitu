@@ -2,7 +2,7 @@ extends Node2D
 
 var _start_orig_scale: Vector2
 var _quit_orig_scale: Vector2
-var _continue_btn: Button
+@onready var _continue_btn: Button = $ContinueBtn
 
 
 func _ready():
@@ -22,13 +22,8 @@ func _ready():
 	_quit_orig_scale = $QuitBtn.scale
 	_update_music_btn()
 	
-	# "继续游戏"按钮（常显）
-	_continue_btn = Button.new()
-	_continue_btn.text = "▶ 继续游戏"
-	_continue_btn.size = Vector2(160, 45)
-	_continue_btn.position = Vector2(560, 440)
+	# "继续游戏"按钮
 	_continue_btn.pressed.connect(_on_continue)
-	add_child(_continue_btn)
 
 
 func _on_start_hover():
