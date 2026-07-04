@@ -792,6 +792,7 @@ func apply_snapshot(snap: Dictionary):
 		TurnManager.Turn.ENEMY:
 			turn_label.text = "敌人回合"
 	_active_player = snap["active_player"]
+	_switch_to(snap["active_player"])
 	
 	# 玩家1
 	player1.hp = snap["p1_hp"]
@@ -815,6 +816,8 @@ func apply_snapshot(snap: Dictionary):
 	if e and snap["enemy_exists"]:
 		e.hp = snap["enemy_hp"]; e.max_hp = snap["enemy_max_hp"]
 		e.block = snap["enemy_block"]
+		e.intent_type = snap["enemy_intent_type"]; e.intent_value = snap["enemy_intent_val"]
+		e.intent_changed.emit(e.intent_type, e.intent_value)
 	
 	# 全局
 	game_over = snap["game_over"]
