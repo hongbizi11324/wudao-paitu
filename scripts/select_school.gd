@@ -240,11 +240,18 @@ func _after_p1_pick():
 
 func _start_dual_run(school_p2: String):
 	"""双人：两人都选完，开战"""
+	# 保存角色名（new_dual_run 会清空它们）
+	var saved_c1 = GameData.selected_character
+	var saved_c2 = GameData.selected_character_2
+	
 	GameData.new_dual_run()
+	# 恢复角色名
+	GameData.selected_character = saved_c1
+	GameData.selected_character_2 = saved_c2
 	
 	# 局域网：通知客机进游戏
 	if NetworkManager.is_lan and NetworkManager.is_host:
-		NetworkManager.rpc("sync_start_game", GameData.selected_character, GameData.selected_character_2, GameData.player_deck.duplicate(), GameData.player2_deck.duplicate())
+		NetworkManager.rpc("sync_start_game", saved_c1, saved_c2, GameData.player_deck.duplicate(), GameData.player2_deck.duplicate())
 	
 	# 玩家1的门派牌
 	match _p1_school:

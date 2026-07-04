@@ -1130,7 +1130,9 @@ func _start_battle():
 	var key = "boss" if ft == GameData.FloorType.BOSS else ("elite" if ft == GameData.FloorType.ELITE else "normal")
 	var candidates = pool.get(key, ["山匪"])
 	if candidates.size() > 0:
-		var eid = candidates[randi() % candidates.size()]
+		# 用楼层做种子确保两边选同一只
+		var idx = GameData.current_floor % candidates.size()
+		var eid = candidates[idx]
 		var tex_path = "res://assets/images/enemies/%s.tres" % eid
 		enemy_portrait.texture = load(tex_path)
 		print("敌人: %s" % eid)
