@@ -158,10 +158,6 @@ func _ready():
 		p2_hp_label.visible = false
 		hand1.visible = true
 	
-	# 牌组
-	# 局域网：用共享种子保证牌序一致
-	if NetworkManager.is_lan:
-	
 	draw_pile = GameData.player_deck.duplicate()
 	draw_pile.shuffle()
 	
