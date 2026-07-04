@@ -700,3 +700,108 @@ func _dump_map() -> String:
 			names.append("%s(C%d)[%s]" % [ts, n.col, st])
 		s += "层%d: %s | " % [i, " ".join(names)]
 	return s
+
+
+# ==============================
+# 存档系统
+# ==============================
+
+const SAVE_VERSION: int = 1
+const SAVE_PATH: String = "user://save.json"
+
+
+func has_save() -> bool:
+	return FileAccess.file_exists(SAVE_PATH)
+
+
+func delete_save():
+	if has_save():
+		DirAccess.remove_absolute(SAVE_PATH)
+		print("[存档] 已删除")
+
+
+func save_game():
+	var data = {
+		"version": SAVE_VERSION,
+		"player": {
+			"character": selected_character,
+			"realm": current_realm,
+			"cultivation": cultivation,
+			"gold": gold,
+			"hp": player_hp,
+			"max_hp": player_max_hp,
+			"deck": player_deck.duplicate()
+		},
+		"player2": {
+			"character": selected_character_2,
+			"realm": player2_realm,
+			"hp": player2_hp,
+			"max_hp": player2_max_hp,
+			"deck": player2_deck.duplicate()
+		},
+		"progress": {
+			"current_floor": current_floor,
+			"biome": current_biome,
+			"act_count": map_act_count,
+			"map_active": map_active,
+			"map_offset": map_current_offset,
+			"map_layers": map_layers.duplicate(),
+			"map_connections": map_connections.duplicate(),
+			"map_node_states": map_node_states.duplicate()
+		},
+		"settings": {
+			"music": true  # 暂存，以后扩展
+		}
+	}
+	
+	var json_str = JSON.stringify(data, "\t")
+	var file = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if file:
+		file.store_string(json_str)
+		print("[存档] 已保存")
+	else:
+		push_error("[存档] 写入失败: " + SAVE_PATH)
+
+
+func load_game() -> bool:
+	if not has_save():
+		return false
+	
+	var file = FileAccess.open(SAVE_PATH, FileAccess.READ)
+	if not file:
+		return false
+	
+	var json_str = file.get_as_text()
+	var parsed = JSON.parse_string(json_str)
+	if parsed == null:
+		push_error("[存档] 解析失败")
+		return false
+	
+	var p = parsed["player"]
+	selected_character = p["character"]
+	current_realm = p["realm"]
+	cultivation = p["cultivation"]
+	gold = p["gold"]
+	player_hp = p["hp"]
+	player_max_hp = p["max_hp"]
+	player_deck = p["deck"]
+	
+	var p2 = parsed.get("player2", {})
+	selected_character_2 = p2.get("character", "")
+	player2_realm = p2.get("realm", 0)
+	player2_hp = p2.get("hp", 60)
+	player2_max_hp = p2.get("max_hp", 60)
+	player2_deck = p2.get("deck", [])
+	
+	var prog = parsed.get("progress", {})
+	current_floor = prog.get("current_floor", 1)
+	current_biome = prog.get("biome", 0)
+	map_act_count = prog.get("act_count", -1)
+	map_active = prog.get("map_active", false)
+	map_current_offset = prog.get("map_offset", 0)
+	map_layers = prog.get("map_layers", [])
+	map_connections = prog.get("map_connections", [])
+	map_node_states = prog.get("map_node_states", [])
+	
+	print("[存档] 已读取")
+	return true

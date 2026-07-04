@@ -130,7 +130,11 @@ func _ready():
 	rest_screen.closed.connect(_on_rest_closed)
 	event_screen.closed.connect(_on_event_closed)
 	
-	# 新游戏：先选路再开打
+	# 读档/新游戏：先选路再开打
+	if GameData.map_active:
+		# 从存档恢复：直接显示地图
+		node_map.open()
+		return
 	if GameData.current_floor == 1 and not GameData.map_active:
 		GameData.generate_new_act()
 		node_map.open()
@@ -801,11 +805,13 @@ func _on_back_to_menu():
 func _on_reward_chosen(card_id: String):
 	GameData.add_card(card_id)
 	print("选择了奖励卡牌: %s" % card_id)
+	GameData.save_game()
 	_show_map()
 
 
 func _on_reward_skipped():
 	print("跳过了奖励")
+	GameData.save_game()
 	_show_map()
 
 
@@ -824,6 +830,7 @@ func _on_node_selected(node_type: int):
 	match node_type:
 		GameData.NodeType.BATTLE_NORMAL, GameData.NodeType.BATTLE_ELITE:
 			# 战斗节点 → 进入战斗场景
+			GameData.map_active = false
 			get_tree().reload_current_scene()
 		
 		GameData.NodeType.SHOP:
@@ -848,6 +855,7 @@ func _on_rest_closed(next_action: String):
 			GameData.add_gold(10)
 			print("休息点·冥想: 修为+10, 金币+10")
 	
+	GameData.save_game()
 	_show_map()
 
 
@@ -885,6 +893,7 @@ func _on_event_closed(_event_id: String, action: String):
 		"skip":
 			print("事件: 跳过了")
 	
+	GameData.save_game()
 	_show_map()
 
 
@@ -897,6 +906,7 @@ func _open_shop():
 
 
 func _on_shop_done():
+	GameData.save_game()
 	_show_map()
 
 
