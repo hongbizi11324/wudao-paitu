@@ -194,3 +194,12 @@ func sync_start_game(p1_char: String, p2_char: String, p1_deck: Array, p2_deck: 
 	GameData.player_deck = p1_deck
 	GameData.player2_deck = p2_deck
 	game_start_ready.emit()
+
+
+# 主机通知客机：回合变了，执行对应阶段的动作
+@rpc("authority", "call_local", "reliable")
+func sync_turn(turn_id: int):
+	var main = get_tree().current_scene
+	if not main or not main.has_method("network_sync_turn"):
+		return
+	main.network_sync_turn(turn_id)

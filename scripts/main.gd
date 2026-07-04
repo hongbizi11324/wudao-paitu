@@ -184,14 +184,19 @@ func _ready():
 	menu_btn.position = Vector2(10, 10)
 	menu_btn.visible = true
 	
-	# 创建回合状态机
+	# 创建回合状态机（客机不启动，完全听主机指挥）
 	turn_manager = TurnManager.new()
 	turn_manager.name = "TurnManager"
 	add_child(turn_manager)
-	turn_manager.turn_started.connect(_on_turn_started)
 	
-	# 开始战斗（首次会触发 _on_turn_started(P1) → 统一抽牌）
-	turn_manager.start_battle(GameData.is_dual_mode)
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		# 客机：不启动 TurnManager，等主机的 RPC 驱动
+		_switch_to(1)
+		_update_ui()
+		_update_deck_ui()
+	else:
+		turn_manager.turn_started.connect(_on_turn_started)
+		turn_manager.start_battle(GameData.is_dual_mode)
 	
 	_update_ui()
 
@@ -208,6 +213,24 @@ func _on_turn_started(turn: int):
 	next_two_cards_discount = 0
 	consecutive_discount_used = false
 	
+	# 局域网：主机同步给客机
+	if NetworkManager.is_lan and NetworkManager.is_host:
+		NetworkManager.rpc("sync_turn", turn)
+	
+	_apply_turn(turn)
+
+
+func network_sync_turn(turn: int):
+	"""客机收到主机回合同步后执行"""
+	# 重置回合追踪变量
+	skill_played_this_turn = 0
+	energy_used_this_turn = 0
+	next_two_cards_discount = 0
+	consecutive_discount_used = false
+	_apply_turn(turn)
+
+
+func _apply_turn(turn: int):
 	match turn:
 		TurnManager.Turn.PLAYER1:
 			_switch_to(1)
