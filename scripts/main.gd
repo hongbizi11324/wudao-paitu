@@ -5,7 +5,6 @@ var discard_pile = []    # 弃牌堆（P1）
 var draw_pile_p2 = []    # 牌库（P2，双人模式）
 var discard_pile_p2 = [] # 弃牌堆（P2，双人模式）
 var game_over = false
-var _in_rpc: bool = false  # RPC广播中，跳过LAN路由
 
 var turn_manager: TurnManager  # 回合状态机
 
@@ -198,6 +197,7 @@ func _ready():
 		turn_manager.turn_started.connect(_on_turn_started)
 		turn_manager.start_battle(GameData.is_dual_mode)
 	
+	_scene_loaded = true
 	_update_ui()
 
 
@@ -206,7 +206,7 @@ func _ready():
 # TurnManager 驱动，单/双人统一处理
 # ==============================
 
-var _turn_sync_delayed: bool = false
+var _scene_loaded: bool = false
 
 func _on_turn_started(turn: int):
 	# 重置回合追踪变量
@@ -215,22 +215,19 @@ func _on_turn_started(turn: int):
 	next_two_cards_discount = 0
 	consecutive_discount_used = false
 	
-	# 局域网：主机同步给客机（首次延迟，等客机加载完）
-	if NetworkManager.is_lan and NetworkManager.is_host:
-		if not _turn_sync_delayed:
-			_turn_sync_delayed = true
-			_apply_turn(turn)
-			await get_tree().create_timer(0.3).timeout
-			NetworkManager.rpc("sync_turn", turn)
-			return
-		else:
-			NetworkManager.rpc("sync_turn", turn)
-	
 	_apply_turn(turn)
+	
+	# 局域网：主机同步回合给客机
+	if NetworkManager.is_lan and NetworkManager.is_host:
+		NetworkManager.rpc("sync_turn", turn)
 
 
 func network_sync_turn(turn: int):
 	"""客机收到主机回合同步后执行"""
+	# 同步屏障：场景未就绪则等待
+	if not _scene_loaded:
+		await get_tree().process_frame
+	
 	# 重置回合追踪变量
 	skill_played_this_turn = 0
 	energy_used_this_turn = 0
@@ -360,13 +357,20 @@ func _on_card_played(card):
 	if game_over:
 		return
 	
-	# 局域网路由：_in_rpc=true表示来自广播，跳过路由直接执行
-	if NetworkManager.is_lan and not _in_rpc:
+	# 局域网路由
+	if NetworkManager.is_lan:
 		if not NetworkManager.is_host:
 			NetworkManager.rpc_id(1, "request_play", card.card_data.card_id, _active_player)
 			return
-		# 主机：直接执行，下面执行完再广播
+		_execute_card(card)
+		NetworkManager.rpc("sync_play", card.card_data.card_id, _active_player)
+		return
 	
+	_execute_card(card)
+
+
+func _execute_card(card):
+	"""纯卡牌效果执行（不含网络路由）"""
 	var data = card.card_data
 	
 	# ===== 费用（凌波微步折扣） =====
@@ -703,34 +707,29 @@ func _on_card_played(card):
 	
 	if enemy.hp <= 0:
 		_on_battle_end(true)
-	
-	# 局域网主机：执行完广播给客机
-	# 局域网主机：执行完广播给客机（_in_rpc 防止广播回来的sync_play再次广播）
-	if NetworkManager.is_lan and NetworkManager.is_host and not _in_rpc:
-		NetworkManager.rpc("sync_play", card.card_data.card_id, _active_player)
-	return
 
 
-# ==============================
-# 结束回合
-# 统一逻辑：弃手牌 → 通知 TurnManager 推进
-# ==============================
 
 func _on_end_turn():
-	if game_over or _in_rpc or turn_manager.current_turn == TurnManager.Turn.ENEMY:
+	if game_over or turn_manager.current_turn == TurnManager.Turn.ENEMY:
 		return
 	
-	# 局域网路由
-	if NetworkManager.is_lan and not _in_rpc:
+	if NetworkManager.is_lan:
 		if not NetworkManager.is_host:
 			NetworkManager.rpc_id(1, "request_end_turn", _active_player)
 			return
-		# 主机：直接执行，下面执行完再广播
+		_do_end_turn()
+		NetworkManager.rpc("sync_end_turn", _active_player)
+		return
 	
-	if hand.selected_card != null:
+	_do_end_turn()
+
+
+func _do_end_turn():
+	"""纯结束回合逻辑（不含网络路由）"""
+	if hand.selected_card != None:
 		hand.deselect()
 	
-	# 弃当前手牌（不含保留）
 	var my_discard = discard_pile_p2 if _active_player == 2 else discard_pile
 	for c in hand.cards.duplicate():
 		if c.card_data.retain:
@@ -739,43 +738,39 @@ func _on_end_turn():
 		hand.remove_card(c)
 		c.queue_free()
 	
-	# 通知 TurnManager → 走状态机切换
 	turn_manager.end_player_turn()
-	
-	# 局域网主机：执行完广播给客机
-	if NetworkManager.is_lan and NetworkManager.is_host and not _in_rpc:
-		NetworkManager.rpc("sync_end_turn", _active_player)
 
 
 # ==============================
 # 局域网 RPC 回调
-# NetworkManager.sync_play / sync_end_turn 调用这里
+# NetworkManager 的 sync_play / sync_end_turn 调用这里
 # ==============================
 
 func network_execute_play(card_id: String, player_id: int):
-	"""执行远程玩家打出的牌（RPC广播回调）"""
-	_in_rpc = true
-	var h = hand1 if player_id == 1 else hand2
+	"""RPC广播回调：执行远程玩家的出牌"""
 	var saved_hand = hand
 	var saved_player = player
-	hand = h
+	var saved_active = _active_player
+	
+	hand = hand1 if player_id == 1 else hand2
 	player = player1 if player_id == 1 else player2
-	for c in h.cards:
+	_active_player = player_id
+	
+	for c in hand.cards:
 		if c.card_data.card_id == card_id:
-			_on_card_played(c)
+			_execute_card(c)
 			break
+	
 	hand = saved_hand
 	player = saved_player
-	_in_rpc = false
+	_active_player = saved_active
 
 
 func network_execute_end_turn(player_id: int):
-	"""执行远程玩家结束回合（RPC广播回调）"""
-	_in_rpc = true
+	"""RPC广播回调：执行远程玩家的结束回合"""
 	if player_id != _active_player:
 		_switch_to(player_id)
-	_on_end_turn()
-	_in_rpc = false
+	_do_end_turn()
 
 
 # ==============================
