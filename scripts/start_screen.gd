@@ -82,7 +82,8 @@ func _on_host():
 	if NetworkManager.host_game():
 		GameData.is_dual_mode = true
 		GameData.new_dual_run()
-		get_tree().change_scene_to_file("res://scenes/select_school.tscn")
+		NetworkManager.waiting_for_p2 = true
+		get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 
 func _on_join():
@@ -92,7 +93,6 @@ func _on_join():
 		_toast("请输入主机IP地址")
 		return
 	if NetworkManager.join_game(ip):
-		# 连上后等种子同步
 		NetworkManager.game_ready.connect(_on_network_ready)
 		_toast("正在连接...")
 

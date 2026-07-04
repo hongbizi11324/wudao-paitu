@@ -99,3 +99,15 @@ func _on_remote_end_turn(player_id: int):
 	if not main or not main.has_method("network_execute_end_turn"):
 		return
 	main.network_execute_end_turn(player_id)
+
+
+# ==============================
+# 地图同步
+# Host选了节点→通知Client跟着走
+# ==============================
+
+@rpc("authority", "call_local", "reliable")
+func sync_select_node(node_type: int):
+	var main = get_tree().current_scene
+	if main and main.has_method("network_select_node"):
+		main.network_select_node(node_type)

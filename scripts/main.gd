@@ -883,6 +883,22 @@ func _show_map():
 # ==============================
 
 func _on_node_selected(node_type: int):
+	# 局域网：只有主机能选节点
+	if NetworkManager.is_lan:
+		if NetworkManager.is_host:
+			NetworkManager.rpc("sync_select_node", node_type)
+			# 主机会通过 RPC 的 call_local 调 network_select_node
+		return
+	
+	_do_select_node(node_type)
+
+
+func network_select_node(node_type: int):
+	"""客机收到主机同步后执行"""
+	_do_select_node(node_type)
+
+
+func _do_select_node(node_type: int):
 	match node_type:
 		GameData.NodeType.BATTLE_NORMAL, GameData.NodeType.BATTLE_ELITE:
 			# 战斗节点 → 进入战斗场景
