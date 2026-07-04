@@ -7,19 +7,29 @@ extends Node
 # 核心：@rpc 同步打牌动作
 # ==============================
 
-var is_lan: bool = false      # 是否局域网模式
-var is_host: bool = false     # 是否是主机（服务器）
-var shared_seed: int = 0      # 共享随机种子
-var p2_peer_id: int = 0       # P2的连接ID（主机端用）
+const DEFAULT_PORT: int = 8080
+const MAX_PLAYERS: int = 2
+const TIMEOUT_SECONDS: float = 15.0
 
-signal game_ready()           # 种子同步完毕
-signal game_start_ready()     # 主机通知客机：选完角色了，可以进游戏了
+var is_lan: bool = false
+var is_host: bool = false
+var shared_seed: int = 0
+var p2_peer_id: int = 0
+
+signal game_ready()
+signal game_start_ready()
+signal player_disconnected()
+
+var _timeout_timer: Timer = null
 
 
-# ---- 主机：开房间 ----
-func host_game(port: int = 8080) -> bool:
+# ==============================
+# 主机/客机 建立连接
+# ==============================
+
+func host_game(port: int = DEFAULT_PORT) -> bool:
 	var peer = ENetMultiplayerPeer.new()
-	var err = peer.create_server(port, 2)  # 最多2人
+	var err = peer.create_server(port, MAX_PLAYERS)
 	if err != OK:
 		push_error("建服失败: %d" % err)
 		return false
@@ -27,14 +37,16 @@ func host_game(port: int = 8080) -> bool:
 	multiplayer.multiplayer_peer = peer
 	is_lan = true
 	is_host = true
-	shared_seed = randi()  # 生成随机种子
+	shared_seed = randi()
+	
 	multiplayer.peer_connected.connect(_on_peer_connected)
+	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	
 	print("[网络] 主机已开，种子=%d" % shared_seed)
 	return true
 
 
-# ---- 客机：加入房间 ----
-func join_game(ip: String, port: int = 8080) -> bool:
+func join_game(ip: String, port: int = DEFAULT_PORT) -> bool:
 	var peer = ENetMultiplayerPeer.new()
 	var err = peer.create_client(ip, port)
 	if err != OK:
@@ -44,50 +56,114 @@ func join_game(ip: String, port: int = 8080) -> bool:
 	multiplayer.multiplayer_peer = peer
 	is_lan = true
 	is_host = false
-	# 连接成功后等服务器发种子
+	
 	multiplayer.connected_to_server.connect(_on_connected_to_server)
+	
+	# ⏱ 连接超时
+	_start_timeout()
 	return true
 
 
+func cleanup():
+	"""断开连接，释放网络资源"""
+	if multiplayer.multiplayer_peer:
+		multiplayer.multiplayer_peer.close()
+		multiplayer.multiplayer_peer = null
+	is_lan = false
+	is_host = false
+	p2_peer_id = 0
+	_stop_timeout()
+	print("[网络] 资源已清理")
+
+
+# ==============================
+# 连接事件
+# ==============================
+
 func _on_connected_to_server():
 	print("[网络] 已连接服务器，等待种子...")
+	_stop_timeout()
 
 
 func _on_peer_connected(id: int):
 	p2_peer_id = id
 	print("[网络] 玩家已连接 (ID=%d)" % id)
-	# 给客机发种子
 	rpc_id(id, "_receive_seed", shared_seed)
+
+
+func _on_peer_disconnected(id: int):
+	print("[网络] 玩家断开连接 (ID=%d)" % id)
+	if p2_peer_id == id:
+		p2_peer_id = 0
+	player_disconnected.emit()
+	cleanup()
 
 
 # ── 客机接收种子 ──
 @rpc("any_peer", "reliable")
 func _receive_seed(seed_val: int):
 	shared_seed = seed_val
-	seed(seed_val)  # 设置Godot全局随机种子
+	seed(seed_val)
 	print("[网络] 收到种子=%d" % seed_val)
 	game_ready.emit()
 
 
 # ==============================
-# RPC 同步函数
-# 打牌/结束回合，call_local保证两边都执行
+# ⏱ 超时
 # ==============================
+
+func _start_timeout():
+	_timeout_timer = Timer.new()
+	_timeout_timer.wait_time = TIMEOUT_SECONDS
+	_timeout_timer.one_shot = true
+	_timeout_timer.timeout.connect(_on_timeout)
+	add_child(_timeout_timer)
+	_timeout_timer.start()
+
+
+func _stop_timeout():
+	if _timeout_timer:
+		_timeout_timer.stop()
+		_timeout_timer.queue_free()
+		_timeout_timer = null
+
+
+func _on_timeout():
+	push_warning("[网络] 连接超时")
+	print("[网络] 连接超时，清理资源")
+	cleanup()
+
+
+# ==============================
+# RPC 同步函数
+# ==============================
+
+# ✅ 参数校验：player_id 只能是 1 或 2
+func _valid_player(pid: int) -> bool:
+	return pid == 1 or pid == 2
+
+func _valid_card(card_id: String) -> bool:
+	return card_id.length() > 0 and card_id.length() < 64
+
 
 # P1或P2打牌同步
 @rpc("any_peer", "call_local", "reliable")
 func sync_play(card_id: String, player_id: int):
+	if not _valid_player(player_id) or not _valid_card(card_id):
+		push_error("[网络] sync_play 参数非法: pid=%d card=%s" % [player_id, card_id])
+		return
 	_on_remote_play(card_id, player_id)
 
 
 # 结束回合同步
 @rpc("any_peer", "call_local", "reliable")
 func sync_end_turn(player_id: int):
+	if not _valid_player(player_id):
+		push_error("[网络] sync_end_turn 参数非法: pid=%d" % player_id)
+		return
 	_on_remote_end_turn(player_id)
 
 
-# 执行打牌（在两边都运行）
-# 从 main.gd 中找到对应手牌执行
 func _on_remote_play(card_id: String, player_id: int):
 	var main = get_tree().current_scene
 	if not main or not main.has_method("network_execute_play"):
@@ -102,11 +178,7 @@ func _on_remote_end_turn(player_id: int):
 	main.network_execute_end_turn(player_id)
 
 
-# ==============================
-# 地图同步
-# Host选了节点→通知Client跟着走
-# ==============================
-
+# 地图节点同步
 @rpc("authority", "call_local", "reliable")
 func sync_select_node(node_type: int):
 	var main = get_tree().current_scene
@@ -114,7 +186,7 @@ func sync_select_node(node_type: int):
 		main.network_select_node(node_type)
 
 
-# 主机选完角色了，通知客机进游戏
+# 主机选完角色，通知客机进游戏
 @rpc("authority", "reliable")
 func sync_start_game():
 	game_start_ready.emit()

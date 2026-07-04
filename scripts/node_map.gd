@@ -348,4 +348,7 @@ func _draw_lines():
 				break
 
 func _on_back_to_menu():
+func _on_back_to_menu():
+	if NetworkManager.is_lan:
+		NetworkManager.cleanup()
 	get_tree().change_scene_to_file("res://scenes/start_screen.tscn")
