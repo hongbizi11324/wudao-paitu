@@ -65,6 +65,7 @@ func _on_continue():
 	# 加载存档 → 进入主场景（自动恢复地图）
 	GameData.load_game()
 	GameData.is_dual_mode = false
+	GameData.loading_save = true
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 

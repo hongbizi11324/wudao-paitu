@@ -130,11 +130,13 @@ func _ready():
 	rest_screen.closed.connect(_on_rest_closed)
 	event_screen.closed.connect(_on_event_closed)
 	
-	# 读档/新游戏：先选路再开打
-	if GameData.map_active:
-		# 从存档恢复：直接显示地图
+	# 从存档恢复：直接显示地图
+	if GameData.loading_save:
+		GameData.loading_save = false
 		node_map.open()
 		return
+	
+	# 新游戏：先选路再开打
 	if GameData.current_floor == 1 and not GameData.map_active:
 		GameData.generate_new_act()
 		node_map.open()
@@ -830,7 +832,6 @@ func _on_node_selected(node_type: int):
 	match node_type:
 		GameData.NodeType.BATTLE_NORMAL, GameData.NodeType.BATTLE_ELITE:
 			# 战斗节点 → 进入战斗场景
-			GameData.map_active = false
 			get_tree().reload_current_scene()
 		
 		GameData.NodeType.SHOP:

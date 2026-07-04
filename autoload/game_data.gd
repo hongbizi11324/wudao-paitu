@@ -306,6 +306,8 @@ func new_run():
 	player_hp = 60
 	player_max_hp = 60
 	selected_character = ""
+	map_active = false
+	loading_save = false
 	print("【新局】第1层·淬体境起步，牌组 %d 张" % player_deck.size())
 
 
@@ -319,6 +321,8 @@ func new_run_custom(deck: Array):
 	player_deck = deck.duplicate()
 	player_hp = 60
 	player_max_hp = 60
+	map_active = false
+	loading_save = false
 	print("【测试】第1层·自定义牌组 %d 张" % player_deck.size())
 
 
@@ -331,6 +335,8 @@ func new_dual_run():
 	cultivation_to_next = 20
 	gold = 20
 	max_energy_per_realm = 3
+	map_active = false
+	loading_save = false
 	
 	# 玩家1初始化
 	player_deck = starter_deck.duplicate()
@@ -435,6 +441,7 @@ const MAP_NODE_MIN_PER_LAYER: int = 1    # 每层最少节点
 const MAP_NODE_MAX_PER_LAYER: int = 3    # 每层最多节点
 var current_biome: Biome = Biome.FOREST  # 当前大关的战斗场景
 var map_active: bool = false           # 地图是否已激活
+var loading_save: bool = false        # 正在从存档加载（标记，防止冲突）
 var map_layers: Array = []             # 每层的节点数据
 var map_connections: Array = []        # 连线: [{from_layer,from_node,to_layer,to_node}]
 var map_node_states: Array = []        # 每个节点状态: "locked" / "available" / "visited" / "boss"
@@ -750,7 +757,7 @@ func save_game():
 			"map_node_states": map_node_states.duplicate()
 		},
 		"settings": {
-			"music": true  # 暂存，以后扩展
+			"music": BgmManager.is_enabled if BgmManager else true
 		}
 	}
 	
@@ -802,6 +809,13 @@ func load_game() -> bool:
 	map_layers = prog.get("map_layers", [])
 	map_connections = prog.get("map_connections", [])
 	map_node_states = prog.get("map_node_states", [])
+	
+	# 恢复设置
+	var sett = parsed.get("settings", {})
+	var music_on = sett.get("music", true)
+	if BgmManager:
+		if music_on != BgmManager.is_enabled:
+			BgmManager.toggle()
 	
 	print("[存档] 已读取")
 	return true
