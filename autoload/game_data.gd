@@ -811,8 +811,10 @@ func load_game() -> bool:
 	map_act_count = prog.get("act_count", -1)
 	map_active = prog.get("map_active", false)
 	map_current_offset = prog.get("map_offset", 0)
-	map_layers = prog.get("map_layers", [])
-	map_connections = prog.get("map_connections", [])
+	# JSON 会把整数转成浮点数（1→1.0），恢复成 int
+	# JSON 会把整数转成浮点数（1→1.0），恢复成 int
+	map_layers = _fix_int_fields(prog.get("map_layers", []))
+	map_connections = _fix_int_fields(prog.get("map_connections", []))
 	map_node_states = prog.get("map_node_states", [])
 	
 	# 恢复设置
@@ -824,3 +826,21 @@ func load_game() -> bool:
 	
 	print("[存档] 已读取")
 	return true
+
+
+# JSON 序列化会把整数变浮点，递归修复
+func _fix_int_fields(data) -> Array:
+	var result = []
+	for item in data:
+		if typeof(item) == TYPE_DICTIONARY:
+			var fixed = {}
+			for k in item:
+				var v = item[k]
+				# 把纯粹的整数值转回 int
+				if typeof(v) == TYPE_FLOAT and v == floor(v):
+					v = int(v)
+				fixed[k] = v
+			result.append(fixed)
+		else:
+			result.append(item)
+	return result
