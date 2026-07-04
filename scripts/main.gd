@@ -353,26 +353,26 @@ func _unhandled_input(event):
 # ==============================
 
 func _on_card_played(card):
+func _on_card_played(card):
 	if game_over:
 		return
+	
+	var _caller = "主机" if NetworkManager.is_host else "客机" if NetworkManager.is_lan else "单机"
+	print("[%s] P%d 出牌: %s" % [_caller, _active_player, card.card_data.card_id])
 	
 	# 局域网路由
 	if NetworkManager.is_lan:
 		if not NetworkManager.is_host:
 			NetworkManager.rpc_id(1, "request_play", card.card_data.card_id, _active_player)
 			return
+		# 主机：执行 + 推快照
 		_execute_card(card)
-	var _caller = "主机" if NetworkManager.is_host else "客机" if NetworkManager.is_lan else "单机"
-	print("[%s] P%d 出牌: %s" % [_caller, _active_player, card.card_data.card_id])
-		NetworkManager.rpc("sync_play", card.card_data.card_id, _active_player)
+		NetworkManager.push_snapshot()
 		return
 	
 	_execute_card(card)
 
 
-func _execute_card(card):
-	"""纯卡牌效果执行（不含网络路由）"""
-	var data = card.card_data
 	
 	# ===== 费用（凌波微步折扣） =====
 	var actual_cost = data.cost
@@ -720,7 +720,7 @@ func _on_end_turn():
 			NetworkManager.rpc_id(1, "request_end_turn", _active_player)
 			return
 		_do_end_turn()
-		NetworkManager.rpc("sync_end_turn", _active_player)
+		NetworkManager.push_snapshot()
 		return
 	
 	_do_end_turn()
