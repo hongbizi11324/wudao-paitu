@@ -131,6 +131,9 @@ func _ready():
 	event_screen.closed.connect(_on_event_closed)
 	
 	# 从存档恢复：直接显示地图
+	# 局域网：用共享种子保证地图/牌序一致
+	if NetworkManager.is_lan:
+		seed(NetworkManager.shared_seed)
 	if GameData.loading_save:
 		GameData.loading_save = false
 		node_map.open()
@@ -158,7 +161,6 @@ func _ready():
 	# 牌组
 	# 局域网：用共享种子保证牌序一致
 	if NetworkManager.is_lan:
-		seed(NetworkManager.shared_seed)
 	
 	draw_pile = GameData.player_deck.duplicate()
 	draw_pile.shuffle()
