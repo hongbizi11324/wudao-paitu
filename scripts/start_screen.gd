@@ -26,11 +26,8 @@ func _ready():
 	if GameData.has_save():
 		_continue_btn = Button.new()
 		_continue_btn.text = "▶ 继续游戏"
-		_continue_btn.size = Vector2(280, 50)
-		_continue_btn.position = Vector2(
-			get_viewport().size.x / 2 - 140,
-			$BtnStart.position.y + 70
-		)
+		_continue_btn.size = Vector2(160, 45)
+		_continue_btn.position = Vector2(560, 440)
 		_continue_btn.pressed.connect(_on_continue)
 		add_child(_continue_btn)
 
