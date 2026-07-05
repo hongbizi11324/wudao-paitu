@@ -40,4 +40,11 @@ static func build_snapshot(main_node: Node) -> Dictionary:
 		snap["enemy_hp"] = e.hp; snap["enemy_max_hp"] = e.max_hp; snap["enemy_block"] = e.block
 		snap["enemy_intent_type"] = e.intent_type; snap["enemy_intent_val"] = e.intent_value
 	
+	# 包含敌人头像路径，确保两端显示一致
+	var ep = main_node.get_node_or_null("EnemyPortrait")
+	if ep and ep.texture:
+		snap["enemy_portrait_path"] = ep.texture.resource_path
+	else:
+		snap["enemy_portrait_path"] = ""
+	
 	return snap

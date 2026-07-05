@@ -37,3 +37,49 @@
 ### 杂项
 - Godot MCP 插件已安装（`@yanhuifair/godot-mcp`），端口3001
 - 可视化编辑规则：所有带图的节点必须在.tscn设默认纹理
+
+## 2026-07-05 局域网联机大重构
+
+### 完成的工作
+
+1. **状态快照同步体系**
+   - 新增 `GameStateSync` autoload: 构建完整游戏状态快照
+   - `NetworkManager.push_snapshot()` + `sync_game_state` RPC
+   - 主机每次关键操作后推快照，客机只接收不执行逻辑
+
+2. **客机端 `apply_snapshot`**
+   - `_diff_hand` 增量更新手牌（不闪烁）
+   - 同步玩家HP/能量/格挡、敌人HP/意图
+   - 回合切换、等待遮罩
+
+3. **清除旧同步体系**
+   - 删除 `sync_play` / `sync_end_turn` / `sync_turn` 调用链
+   - `request_play` / `request_end_turn` 改为推快照
+   - `_on_turn_started` 改为推快照
+
+4. **Bug修复**
+   - `mouse_filter` 未设导致头像点不了
+   - `autoload` 顺序导致 GameStateSync 找不到
+   - `seed()` 在地图生成后才调用导致图不同
+   - `_in_rpc` 拦死正常执行
+   - `_on_card_played` 逻辑拆分
+
+5. **文档**
+   - 项目知识图谱 `项目知识图谱.md`
+   - 局域网联机代码全集 `E:\局域网联机代码全集.txt`
+   - BUG备忘录 `BUG备忘录_局域网联机.md`
+
+### 遗留问题
+- 战斗仍有异步（奖励画面、敌人伤害等未完全覆盖）
+- 商店/休息/事件节点联机未实现
+- 断线重连未实现
+
+### Git log
+```
+3304e3b 🧹 清理旧 sync_play/sync_end_turn 调用
+bde6857 🐛 修复地图不同步：seed 移到 _ready 最前端
+80315df 🔊 添加出牌和快照日志
+1234641 🐛 修复 autoload 顺序 + apply_snapshot
+756670f ♻️ 状态快照同步替换操作同步
+...
+```

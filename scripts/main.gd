@@ -280,37 +280,83 @@ func _execute_enemy_turn():
 
 func _switch_to(p: int):
 	_active_player = p
-	if p == 1:
-		hand = hand1
-		player = player1
-		player_portrait = p1_portrait
-		player_name_label = p1_name_label
-		hp_label = p1_hp_label
-		energy_label = p1_energy_label
-		block_label = p1_block_label
-		hand1.visible = true
-		hand2.visible = false
+	
+	if NetworkManager.is_lan:
+		# LAN 双人模式：每个客户端只显示本地玩家的手牌
+		var is_local = (NetworkManager.is_host and p == 1) or (not NetworkManager.is_host and p == 2)
+		
+		if NetworkManager.is_host:
+			hand = hand1
+			player = player1
+			player_portrait = p1_portrait
+			player_name_label = p1_name_label
+			hp_label = p1_hp_label
+			energy_label = p1_energy_label
+			block_label = p1_block_label
+			if is_local:
+				hand1.visible = true
+				hand2.visible = false
+				_hide_waiting_mask()
+			else:
+				hand1.visible = false
+				hand2.visible = false
+				# 不 return：回合逻辑仍要执行（抽牌/回内），但 UI 遮罩挡住操作
+				_show_waiting_mask("等待玩家2操作...")
+		else:
+			hand = hand2
+			player = player2
+			player_portrait = p2_portrait
+			player_name_label = p2_name_label
+			hp_label = p2_hp_label
+			energy_label = p1_energy_label
+			block_label = p1_block_label
+			if is_local:
+				hand1.visible = false
+				hand2.visible = true
+				_hide_waiting_mask()
+			else:
+				hand1.visible = false
+				hand2.visible = false
+				_show_waiting_mask("等待玩家1操作...")
 	else:
-		hand = hand2
-		player = player2
-		player_portrait = p2_portrait
-		player_name_label = p2_name_label
-		hp_label = p2_hp_label
-		energy_label = p1_energy_label
-		block_label = p1_block_label
-		hand1.visible = false
-		hand2.visible = true
+		# 同屏双人模式：正常切换手牌可见
+		if p == 1:
+			hand = hand1
+			player = player1
+			player_portrait = p1_portrait
+			player_name_label = p1_name_label
+			hp_label = p1_hp_label
+			energy_label = p1_energy_label
+			block_label = p1_block_label
+			hand1.visible = true
+			hand2.visible = false
+		else:
+			hand = hand2
+			player = player2
+			player_portrait = p2_portrait
+			player_name_label = p2_name_label
+			hp_label = p2_hp_label
+			energy_label = p1_energy_label
+			block_label = p1_block_label
+			hand1.visible = false
+			hand2.visible = true
+		_hide_waiting_mask()
+	
 	_update_ui()
 	_update_turn_label("玩家%d的回合" % p)
 
 
 func _on_p1_portrait_clicked(event: InputEvent):
 	if event is InputEventMouseButton and event.pressed:
+		if NetworkManager.is_lan:
+			return
 		_switch_to(1)
 
 
 func _on_p2_portrait_clicked(event: InputEvent):
 	if event is InputEventMouseButton and event.pressed:
+		if NetworkManager.is_lan:
+			return
 		_switch_to(2)
 
 
@@ -353,8 +399,12 @@ func _unhandled_input(event):
 # ==============================
 
 func _on_card_played(card):
-func _on_card_played(card):
 	if game_over:
+		return
+	
+	# 所有权校验：这张牌必须属于当前活跃玩家的手牌
+	if card.get_parent() != hand:
+		print("[拒绝] 牌 %s 不属于当前玩家" % card.card_data.card_id)
 		return
 	
 	var _caller = "主机" if NetworkManager.is_host else "客机" if NetworkManager.is_lan else "单机"
@@ -374,6 +424,9 @@ func _on_card_played(card):
 
 
 	
+func _execute_card(card):
+	var data = card.card_data
+
 	# ===== 费用（凌波微步折扣） =====
 	var actual_cost = data.cost
 	# 逍遥游：攻击/内力牌费用-1
@@ -715,7 +768,12 @@ func _on_end_turn():
 	if game_over or turn_manager.current_turn == TurnManager.Turn.ENEMY:
 		return
 	
+	# LAN 模式：只能结束本地玩家的回合
 	if NetworkManager.is_lan:
+		if NetworkManager.is_host and _active_player != 1:
+			return
+		if not NetworkManager.is_host and _active_player != 2:
+			return
 		if not NetworkManager.is_host:
 			NetworkManager.rpc_id(1, "request_end_turn", _active_player)
 			return
@@ -820,10 +878,15 @@ func apply_snapshot(snap: Dictionary):
 		e.intent_type = snap["enemy_intent_type"]; e.intent_value = snap["enemy_intent_val"]
 		e.intent_changed.emit(e.intent_type, e.intent_value)
 	
+	# 敌人头像同步
+	var tex_path = snap.get("enemy_portrait_path", "")
+	if tex_path != "":
+		enemy_portrait.texture = load(tex_path)
+	
 	# 全局
 	game_over = snap["game_over"]
 	_update_ui()
-	_hide_waiting_mask()
+	# 遮罩由 _switch_to 管理
 
 
 func _diff_hand(hand_node, target_ids: Array):

@@ -184,9 +184,9 @@ text = "你的回合"
 horizontal_alignment = 1
 
 [node name="EnemyPortrait" type="TextureRect" parent="." unique_id=831653137]
-offset_left = 775.00006
+offset_left = 774.0
 offset_top = 335.00003
-offset_right = 916.82196
+offset_right = 915.8219
 offset_bottom = 462.17398
 scale = Vector2(1.3890656, 1.5262673)
 texture = ExtResource("15")
@@ -230,10 +230,10 @@ horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="Player2HpLabel" type="Label" parent="." unique_id=1090278443]
-offset_left = 950.0
-offset_top = 300.0
-offset_right = 1250.0
-offset_bottom = 330.0
+offset_left = 69.0
+offset_top = 578.0
+offset_right = 369.0
+offset_bottom = 608.0
 theme_override_colors/font_color = Color(1, 0.2, 0.2, 1)
 theme_override_font_sizes/font_size = 20
 text = "HP 60/60"
