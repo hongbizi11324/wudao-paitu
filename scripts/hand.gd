@@ -63,9 +63,10 @@ func remove_card(card):
 
 
 func clear():
-	"""清空所有手牌。"""
+	"""清空所有手牌并回收至对象池。"""
 	for c in cards:
-		c.queue_free()
+		if is_instance_valid(c):
+			CardPool.release(c)
 	cards.clear()
 	selected_card = null
 	hovered_card = null

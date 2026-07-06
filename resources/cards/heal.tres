@@ -1,12 +1,19 @@
-[gd_resource type="Resource" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="CardData" format=3 uid="uid://cp1ekspwqxd6d"]
 
-[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://bwf35mxdgdc2t" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://y4dydk0ttxfh" path="res://resources/effects/effect_resource.gd" id="1_tfrnq"]
+[ext_resource type="Script" uid="uid://duompuwkrb4d2" path="res://resources/effects/heal_effect.gd" id="2_guvwj"]
+
+[sub_resource type="Resource" id="Resource_5beww"]
+script = ExtResource("2_guvwj")
+heal = 4
+id = "heal_4"
 
 [resource]
 script = ExtResource("1")
 card_id = "heal"
 card_name = "治疗"
 card_type = 1
-cost = 1
 description = "回复4点生命"
 heal = 4
+effects = Array[ExtResource("1_tfrnq")]([SubResource("Resource_5beww")])

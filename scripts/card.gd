@@ -64,3 +64,25 @@ func _gui_input(event):
 	and event.button_index == MOUSE_BUTTON_LEFT:
 		get_viewport().set_input_as_handled()
 		clicked.emit()
+
+
+# ==============================
+# 对象池支持
+# ==============================
+
+# 回收时重置到初始状态
+func reset_pooled():
+	# 断开所有信号连接，避免重复连接报错
+	for c in clicked.get_connections():
+		clicked.disconnect(c.callable)
+	for c in mouse_entered.get_connections():
+		mouse_entered.disconnect(c.callable)
+	for c in mouse_exited.get_connections():
+		mouse_exited.disconnect(c.callable)
+	
+	card_data = null
+	$NameLabel.text = ""
+	$CostLabel.text = ""
+	$DescLabel.text = ""
+	$RetainLabel.visible = false
+	$TypeOverlay.color = Color(1, 1, 1, 0)

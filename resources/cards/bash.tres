@@ -1,12 +1,19 @@
-[gd_resource type="Resource" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="CardData" format=3 uid="uid://b6tr2e0hd46nl"]
 
-[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://bwf35mxdgdc2t" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://y4dydk0ttxfh" path="res://resources/effects/effect_resource.gd" id="1_c68xe"]
+[ext_resource type="Script" uid="uid://ce1yple46wqnp" path="res://resources/effects/damage_effect.gd" id="2_pmqor"]
+
+[sub_resource type="Resource" id="Resource_1tgcc"]
+script = ExtResource("2_pmqor")
+damage = 10
+id = "dmg_10"
 
 [resource]
 script = ExtResource("1")
 card_id = "bash"
 card_name = "重击"
-card_type = 0
 cost = 2
 description = "造成10点伤害"
 damage = 10
+effects = Array[ExtResource("1_c68xe")]([SubResource("Resource_1tgcc")])

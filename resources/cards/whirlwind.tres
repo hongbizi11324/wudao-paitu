@@ -1,13 +1,25 @@
-[gd_resource type="Resource" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="CardData" format=3 uid="uid://bx6y8us6ba8i7"]
 
-[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://bwf35mxdgdc2t" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://y4dydk0ttxfh" path="res://resources/effects/effect_resource.gd" id="1_dvwvo"]
+[ext_resource type="Script" uid="uid://ce1yple46wqnp" path="res://resources/effects/damage_effect.gd" id="2_pd6xs"]
+[ext_resource type="Script" uid="uid://b61yny7dd4br0" path="res://resources/effects/draw_effect.gd" id="3_meua0"]
+
+[sub_resource type="Resource" id="Resource_ltw0r"]
+script = ExtResource("2_pd6xs")
+damage = 8
+id = "dmg_8"
+
+[sub_resource type="Resource" id="Resource_pnnhv"]
+script = ExtResource("3_meua0")
+id = "draw_1"
 
 [resource]
 script = ExtResource("1")
 card_id = "whirlwind"
 card_name = "旋风"
-card_type = 0
 cost = 2
 description = "造成8点伤害，抽1张牌"
 damage = 8
 draw = 1
+effects = Array[ExtResource("1_dvwvo")]([SubResource("Resource_ltw0r"), SubResource("Resource_pnnhv")])

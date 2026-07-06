@@ -1,12 +1,19 @@
-[gd_resource type="Resource" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="CardData" format=3 uid="uid://d0pnwpi2eqwdj"]
 
-[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://bwf35mxdgdc2t" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://y4dydk0ttxfh" path="res://resources/effects/effect_resource.gd" id="1_xs6gi"]
+[ext_resource type="Script" uid="uid://b61yny7dd4br0" path="res://resources/effects/draw_effect.gd" id="2_ltpkr"]
+
+[sub_resource type="Resource" id="Resource_wr4ms"]
+script = ExtResource("2_ltpkr")
+count = 2
+id = "draw_2"
 
 [resource]
 script = ExtResource("1")
 card_id = "light_step"
 card_name = "轻身术"
 card_type = 4
-cost = 1
 description = "抽2张牌"
 draw = 2
+effects = Array[ExtResource("1_xs6gi")]([SubResource("Resource_wr4ms")])

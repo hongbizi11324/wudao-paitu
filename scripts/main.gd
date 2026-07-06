@@ -380,10 +380,10 @@ func _switch_draw(h: Node2D, pile: Array, discard_ref: Array, count: int = 4):
 		var card_id = pile.pop_back()
 		var path = "res://resources/cards/%s.tres" % card_id
 		var data = load(path)
-		var card = card_scene.instantiate()
+		var card = CardPool.acquire(card_scene)
 		card.setup(data)
 		if not h.add_card(card):
-			card.queue_free()
+			CardPool.release(card)
 	print("抽牌完成")
 
 
@@ -452,7 +452,12 @@ func _execute_card(card):
 	if data.card_type == CardData.CardType.SKILL:
 		skill_played_this_turn += 1
 	
-	# ===== 效果计算 =====
+	# ===== NEW: 效果系统（优先执行） =====
+	if data.has_effects():
+		_execute_card_via_effects(card, data)
+		return
+	
+	# ===== 效果计算（旧版回退） =====
 	var times = max(1, data.repeat)
 	# 基础值统一从 .tres 读取（含境界加成），match分支只处理特殊逻辑
 	var dmg = data.damage + GameData.get_damage_bonus()
@@ -591,7 +596,7 @@ func _execute_card(card):
 				var dc = discard_pile_p2 if _active_player == 2 else discard_pile
 				dc.append(to_discard.card_data.card_id)
 				hand.remove_card(to_discard)
-				to_discard.queue_free()
+				CardPool.release(to_discard)
 				print("断水流 弃牌→伤害%d" % dmg)
 		
 		"xy_wanxiang":
@@ -603,7 +608,7 @@ func _execute_card(card):
 				if c != card:
 					dc.append(c.card_data.card_id)
 					hand.remove_card(c)
-					c.queue_free()
+					CardPool.release(c)
 		
 		"xy_xiuli":
 			# 将1张手牌移至牌顶。若移除的是攻击牌，抽1张
@@ -617,7 +622,7 @@ func _execute_card(card):
 				dp.append(to_move.card_data.card_id)
 				var is_attack = to_move.card_data.card_type == CardData.CardType.ATTACK
 				hand.remove_card(to_move)
-				to_move.queue_free()
+				CardPool.release(to_move)
 				if is_attack:
 					extra_draw += 1
 					print("袖里乾坤 移走攻击牌 → 抽1")
@@ -755,13 +760,210 @@ func _execute_card(card):
 		dc.append(card.card_data.card_id)
 	
 	hand.remove_card(card)
-	card.queue_free()
+	CardPool.release(card)
 	_update_deck_ui()
 	_update_sect_ui()
 	
 	if enemy.hp <= 0:
 		_on_battle_end(true)
 
+
+# ====================================================================
+# 效果系统（NEW）
+# 替代旧版 _execute_card 的 match 分支
+# 卡牌如有 effects 数组则走此路径，否则回退旧路径
+# ====================================================================
+
+func _execute_card_via_effects(card_node, data: CardData):
+	var dp = draw_pile_p2 if _active_player == 2 else draw_pile
+	var dc = discard_pile_p2 if _active_player == 2 else discard_pile
+	
+	# 构建效果执行上下文
+	var ctx = EffectContext.new()
+	ctx.player = player
+	ctx.enemy = enemy
+	ctx.hand = hand
+	ctx.draw_pile = dp
+	ctx.discard_pile = dc
+	ctx.card_data = data
+	ctx.last_played_card_id = last_played_card_id
+	ctx.last_played_card_type = last_played_card_type
+	ctx.skill_played_this_turn = skill_played_this_turn
+	ctx.energy_used_this_turn = energy_used_this_turn
+	ctx.next_card_discount = player.next_card_discount
+	
+	# 遍历并执行每个效果
+	for effect in data.effects:
+		if effect is ScriptedEffect:
+			# 复杂效果：分派到旧版逻辑
+			_handle_scripted_effect(effect.script_id, ctx, card_node)
+		else:
+			effect.execute(ctx)
+		
+		# 需要等待玩家选择（如小无相功/袖里乾坤）
+		# 后续操作由回调继续
+		if ctx.wait_for_reply:
+			# 标记等待中，卡牌不丢弃，等回调完成
+			return
+	
+	# 应用效果结果
+	_apply_effect_results(card_node, data, ctx)
+
+
+func _handle_scripted_effect(script_id: String, ctx: EffectContext, card_node):
+	# 效果系统兜底：复杂的独特卡牌效果
+	# 这些效果因为涉及复杂操作（选牌、复制等），暂时无法数据驱动
+	match script_id:
+		"xy_lingbo":
+			player.next_card_discount = 1
+			print("凌波微步 下张牌费用-1")
+		
+		"xy_wuxiang":
+			ctx.is_consumed = true
+			var copied_id = ""
+			var reversed = ctx.discard_pile.duplicate()
+			reversed.reverse()
+			for cid in reversed:
+				if cid not in ["sl_damo","wd_twoway","xy_bahuang","xy_wuxiang"]:
+					copied_id = cid
+					break
+			if copied_id != "":
+				var cpath = "res://resources/cards/%s.tres" % copied_id
+				var cdata = load(cpath)
+				var cscene = load("res://scenes/card.tscn")
+				var new_card = cscene.instantiate()
+				new_card.setup(cdata)
+				hand.add_card(new_card)
+				print("小无相功 复制 -> %s" % copied_id)
+			else:
+				print("小无相功 弃牌堆无牌可复制")
+		
+		"xy_jinghua":
+			if ctx.last_played_card_id != "" and ctx.last_played_card_id != "xy_jinghua":
+				var last_path = "res://resources/cards/%s.tres" % ctx.last_played_card_id
+				var last_data = load(last_path)
+				if last_data and last_data.card_type != CardData.CardType.POWER:
+					var cscene = load("res://scenes/card.tscn")
+					var new_card = cscene.instantiate()
+					new_card.setup(last_data)
+					hand.add_card(new_card)
+					print("镜花水月 复制 -> %s" % ctx.last_played_card_id)
+				else:
+					print("镜花水月 上一张是POWER/无效，跳过")
+			else:
+				print("镜花水月 无上一张牌，跳过")
+		
+		"xy_xiuli":
+			var to_move = null
+			for c in hand.cards:
+				if c != card_node:
+					to_move = c
+					break
+			if to_move != null:
+				var dp = ctx.draw_pile
+				dp.append(to_move.card_data.card_id)
+				var is_attack = to_move.card_data.card_type == CardData.CardType.ATTACK
+				hand.remove_card(to_move)
+				CardPool.release(to_move)
+				if is_attack:
+					ctx.total_draw += 1
+					print("袖里乾坤 移走攻击牌 → 抽1")
+		
+		"xy_duanliu":
+			var to_discard = null
+			for c in hand.cards:
+				if c != card_node:
+					to_discard = c
+					break
+			if to_discard != null:
+				ctx.total_damage += 3
+				var dc = ctx.discard_pile
+				dc.append(to_discard.card_data.card_id)
+				hand.remove_card(to_discard)
+				CardPool.release(to_discard)
+				print("断水流 弃牌→伤害+3")
+		
+		"xy_wanxiang":
+			var hand_size = hand.cards.size()
+			ctx.total_damage = hand_size * 3
+			print("万象归一 手牌%d张 → 伤害%d" % [hand_size, ctx.total_damage])
+			var dc = ctx.discard_pile
+			for c in hand.cards.duplicate():
+				if c != card_node:
+					dc.append(c.card_data.card_id)
+					hand.remove_card(c)
+					CardPool.release(c)
+		
+		"xy_xushi":
+			next_two_cards_discount = 2
+			if consecutive_discount_used:
+				next_two_cards_discount = 3
+				print("虚实相生 连续技能 → 下3减")
+			else:
+				print("虚实相生 下2减")
+		
+		"xy_qiguan":
+			if player.energy >= 2:
+				player.energy -= 2
+				energy_used_this_turn += 2
+				player.energy_changed.emit(player.energy, player.max_energy)
+				ctx.total_damage += 6
+				print("气贯长虹 额外+2内力 → 伤害%d" % (6))
+		
+		"xy_xixing":
+			if enemy.block > 0:
+				ctx.total_damage += 5
+				var healamount = ctx.total_damage
+				# 回血要在 apply 阶段处理
+				ctx.total_heal += healamount
+				print("吸星大法 敌有护盾 → 伤害+5, 回血%d" % healamount)
+		
+		"xy_yibizhi":
+			ctx.total_block = enemy.intent_value
+			print("以彼之道 复制%d点格挡" % ctx.total_block)
+		
+		_:
+			push_warning("ScriptedEffect: unhandled script_id '%s'" % script_id)
+
+
+func _apply_effect_results(card_node, data: CardData, ctx: EffectContext):
+	# ===== 执行伤害 =====
+	if ctx.total_damage > 0 or ctx.total_armor_break > 0:
+		enemy.take_damage(ctx.total_damage, ctx.total_armor_break)
+	
+	# ===== 执行格挡 =====
+	if ctx.total_block > 0:
+		player.add_block(ctx.total_block)
+	
+	# ===== 执行回血 =====
+	if ctx.total_heal > 0:
+		player.heal(ctx.total_heal)
+	
+	# ===== 执行抽牌 =====
+	if ctx.total_draw > 0:
+		_switch_draw(hand, ctx.draw_pile, ctx.discard_pile, ctx.total_draw)
+	
+	# ===== 执行内力 =====
+	if ctx.total_energy > 0:
+		player.gain_energy(ctx.total_energy)
+	elif ctx.total_energy < 0:
+		# 消耗内力（气贯长虹等已在 scripted 里处理了）
+		var spend = -ctx.total_energy
+		player.energy = max(0, player.energy - spend)
+		energy_used_this_turn += spend
+		player.energy_changed.emit(player.energy, player.max_energy)
+	
+	# ===== 弃牌/消耗 =====
+	if not ctx.is_consumed:
+		ctx.discard_pile.append(card_node.card_data.card_id)
+	
+	hand.remove_card(card_node)
+	CardPool.release(card_node)
+	_update_deck_ui()
+	_update_sect_ui()
+	
+	if enemy.hp <= 0:
+		_on_battle_end(true)
 
 
 func _on_end_turn():
@@ -795,7 +997,7 @@ func _do_end_turn():
 			continue
 		my_discard.append(c.card_data.card_id)
 		hand.remove_card(c)
-		c.queue_free()
+		CardPool.release(c)
 	
 	turn_manager.end_player_turn()
 
@@ -915,7 +1117,7 @@ func _diff_hand(hand_node, target_ids: Array):
 			var data = load(path)
 			if data:
 				var card_scene = load("res://scenes/card.tscn")
-				var card = card_scene.instantiate()
+				var card = CardPool.acquire(card_scene)
 				card.setup(data)
 				hand_node.add_card(card)
 
@@ -969,12 +1171,12 @@ func _trigger_power_effects():
 		var path = "res://resources/cards/%s.tres" % card_id
 		var data = load(path)
 		var card_scene = load("res://scenes/card.tscn")
-		var card = card_scene.instantiate()
+		var card = CardPool.acquire(card_scene)
 		card.setup(data)
 		if hand.add_card(card):
 			print("八荒六合：回复3HP，获得 %s" % card_id)
 		else:
-			card.queue_free()
+			CardPool.release(card)
 			discard_pile.append(card_id)
 	
 	# 🦋 逍遥游：手牌上限+2，攻击/内力牌费用-1（通过标记实现，不修改卡面数据）

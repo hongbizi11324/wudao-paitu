@@ -1,13 +1,25 @@
-[gd_resource type="Resource" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="CardData" format=3 uid="uid://mq6bn7fl4jnp"]
 
-[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://bwf35mxdgdc2t" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://y4dydk0ttxfh" path="res://resources/effects/effect_resource.gd" id="1_1xitv"]
+[ext_resource type="Script" uid="uid://duompuwkrb4d2" path="res://resources/effects/heal_effect.gd" id="2_c5ei2"]
+[ext_resource type="Script" uid="uid://b61yny7dd4br0" path="res://resources/effects/draw_effect.gd" id="3_c5m7d"]
+
+[sub_resource type="Resource" id="Resource_e3lxt"]
+script = ExtResource("2_c5ei2")
+heal = 3
+id = "heal_3"
+
+[sub_resource type="Resource" id="Resource_pcxoi"]
+script = ExtResource("3_c5m7d")
+id = "draw_1"
 
 [resource]
 script = ExtResource("1")
 card_id = "vigor"
 card_name = "活力"
 card_type = 1
-cost = 1
 description = "回复3点生命，抽1张牌"
 heal = 3
 draw = 1
+effects = Array[ExtResource("1_1xitv")]([SubResource("Resource_e3lxt"), SubResource("Resource_pcxoi")])

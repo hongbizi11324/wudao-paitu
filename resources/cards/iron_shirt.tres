@@ -1,12 +1,19 @@
-[gd_resource type="Resource" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="CardData" format=3 uid="uid://bbatjgul67at5"]
 
-[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://bwf35mxdgdc2t" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://y4dydk0ttxfh" path="res://resources/effects/effect_resource.gd" id="1_0kp1u"]
+[ext_resource type="Script" uid="uid://iftokj1lxrbo" path="res://resources/effects/block_effect.gd" id="2_o6rux"]
+
+[sub_resource type="Resource" id="Resource_3lcxa"]
+script = ExtResource("2_o6rux")
+block = 4
+id = "blk_4"
 
 [resource]
 script = ExtResource("1")
 card_id = "iron_shirt"
 card_name = "铁布衫"
 card_type = 1
-cost = 1
 description = "获得4点格挡"
 block = 4
+effects = Array[ExtResource("1_0kp1u")]([SubResource("Resource_3lcxa")])

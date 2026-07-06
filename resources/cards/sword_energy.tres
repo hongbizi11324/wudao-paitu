@@ -1,12 +1,19 @@
-[gd_resource type="Resource" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="CardData" format=3 uid="uid://bq0e3khfywqp0"]
 
-[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://bwf35mxdgdc2t" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://y4dydk0ttxfh" path="res://resources/effects/effect_resource.gd" id="1_y7ouv"]
+[ext_resource type="Script" uid="uid://ce1yple46wqnp" path="res://resources/effects/damage_effect.gd" id="2_1mtvo"]
+
+[sub_resource type="Resource" id="Resource_rxtmg"]
+script = ExtResource("2_1mtvo")
+damage = 6
+id = "dmg_6"
 
 [resource]
 script = ExtResource("1")
 card_id = "sword_energy"
 card_name = "剑气纵横"
-card_type = 0
 cost = 2
 description = "造成6点伤害"
 damage = 6
+effects = Array[ExtResource("1_y7ouv")]([SubResource("Resource_rxtmg")])

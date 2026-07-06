@@ -1,13 +1,25 @@
-[gd_resource type="Resource" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="CardData" format=3 uid="uid://qc7ejuq8aplb"]
 
-[ext_resource type="Script" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://bwf35mxdgdc2t" path="res://scripts/card_data.gd" id="1"]
+[ext_resource type="Script" uid="uid://y4dydk0ttxfh" path="res://resources/effects/effect_resource.gd" id="1_7c10r"]
+[ext_resource type="Script" uid="uid://ce1yple46wqnp" path="res://resources/effects/damage_effect.gd" id="2_0tab6"]
+[ext_resource type="Script" uid="uid://iftokj1lxrbo" path="res://resources/effects/block_effect.gd" id="3_abfwx"]
+
+[sub_resource type="Resource" id="Resource_267o8"]
+script = ExtResource("2_0tab6")
+damage = 3
+id = "dmg_3"
+
+[sub_resource type="Resource" id="Resource_bccjr"]
+script = ExtResource("3_abfwx")
+block = 2
+id = "blk_2"
 
 [resource]
 script = ExtResource("1")
 card_id = "vajra_fist"
 card_name = "金刚拳"
-card_type = 0
-cost = 1
 description = "造成3点伤害，获得2点格挡"
 damage = 3
 block = 2
+effects = Array[ExtResource("1_7c10r")]([SubResource("Resource_267o8"), SubResource("Resource_bccjr")])
