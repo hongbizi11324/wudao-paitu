@@ -2,6 +2,59 @@
 
 ---
 
+## 2026-07-06 Lua 热更 PoC
+
+### 完成的工作
+
+1. **安装 lua-gdextension v0.8.1**（Lua 5.4 版）
+   - 从 GitHub release 下载预编译包，放入 `addons/lua-gdextension/`
+   - `project.godot` 启用插件 + 注册 `LuaRuntime` autoload
+   - Windows x86_64 DLL（debug + release）
+
+2. **LuaRuntime 桥接层** (`autoload/lua_runtime.gd`)
+   - 管理 `LuaState` 生命周期
+   - 注入 GDScript 回调：`gd_get_damage_bonus` / `gd_get_punch_damage` 等
+   - `execute_card(card_id, ctx)` — 调用 Lua 卡牌效果函数
+   - `reload()` / `check_and_reload()` — 热重载机制
+   - **Ctrl+R** 快捷键热重载所有 Lua 文件
+
+3. **Lua 卡牌效果脚本** (`lua/cards.lua`)
+   - 全局表 `CardEffects[card_id] = function(ctx) -> Dictionary`
+   - 已迁移 17 张卡：strike / defend / bash / punch / meditate / heal /
+     double_strike / light_step / sl_fist / sl_iron / sl_golden / sl_arhat /
+     wd_taiji / wd_soft / xy_beiming / xy_zhemel / xy_fengjuan
+   - 返回 Godot `Dictionary{}`，支持 `special` 字段触发 chan/jianyi 变化
+
+4. **main.gd 接入 Lua 路径**
+   - `_try_execute_card_via_lua()` — 构建上下文 Dictionary，调用 Lua
+   - 在 `_execute_card` 中费用扣除后、match 分支前插入
+   - 无 Lua 实现时自动回退原有 GDScript 逻辑
+
+### 架构
+
+```
+GDScript（宿主）               Lua（可热更）
+─────────────                  ──────────
+main.gd                        cards.lua
+  _execute_card                  CardEffects.strike(ctx)
+    → _try_execute_card_via_lua    → return Dictionary{damage=6, ...}
+    → apply results                ← GDScript 执行伤害/格挡/回血
+```
+
+### 热更流程
+1. 游戏运行中修改 `lua/cards.lua`
+2. 按 **Ctrl+R**（或调用 `LuaRuntime.reload()`）
+3. `_lua.do_file()` 重新执行 Lua 文件，全局 `CardEffects` 表更新
+4. 下次出牌即用新逻辑
+
+### 已知限制（PoC 阶段）
+- 复杂卡牌效果（小无相功复制、袖里乾坤选牌等）未迁移
+- POWER 卡激活逻辑未迁移
+- 联机模式下 Lua 路径仅在主机执行（客机不执行逻辑，无影响）
+- Lua 错误时自动禁用 Lua 路径，回退 GDScript
+
+---
+
 ## 2026-07-03 大改
 
 ### 地图系统

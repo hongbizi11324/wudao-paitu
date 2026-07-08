@@ -99,6 +99,9 @@ const BIOME_ENEMIES = {
 
 
 func _ready():
+	# 设置 Lua 宿主引用
+	LuaRuntime.host = self
+	
 	# 先设置别名，确保信号触发时不会null
 	hand = hand1
 	player = player1
@@ -194,6 +197,7 @@ func _ready():
 		_update_deck_ui()
 	else:
 		turn_manager.turn_started.connect(_on_turn_started)
+		turn_manager.turn_changed.connect(_on_turn_started)
 		turn_manager.start_battle(GameData.is_dual_mode)
 	
 	_scene_loaded = true
@@ -243,13 +247,16 @@ func _apply_turn(turn: int):
 			player1.refill_energy()
 			if GameData.is_dual_mode:
 				player2.refill_energy()
+				_switch_draw(hand2, draw_pile_p2, discard_pile_p2)
 			_trigger_power_effects()
 			end_turn_btn.text = "结束回合"
 			end_turn_btn.disabled = false
 			_update_ui()
 			_update_deck_ui()
+			_refresh_card_previews()
 		
 		TurnManager.Turn.PLAYER2:
+			# 旧路径保留：单人模式不会走到这里
 			_switch_to(2)
 			_switch_draw(hand2, draw_pile_p2, discard_pile_p2)
 			player2.refill_energy()
@@ -257,6 +264,7 @@ func _apply_turn(turn: int):
 			end_turn_btn.disabled = false
 			_update_ui()
 			_update_deck_ui()
+			_refresh_card_previews()
 		
 		TurnManager.Turn.ENEMY:
 			end_turn_btn.disabled = true
@@ -282,45 +290,7 @@ func _switch_to(p: int):
 	_active_player = p
 	
 	if NetworkManager.is_lan:
-		# LAN 双人模式：每个客户端只显示本地玩家的手牌
-		var is_local = (NetworkManager.is_host and p == 1) or (not NetworkManager.is_host and p == 2)
-		
 		if NetworkManager.is_host:
-			hand = hand1
-			player = player1
-			player_portrait = p1_portrait
-			player_name_label = p1_name_label
-			hp_label = p1_hp_label
-			energy_label = p1_energy_label
-			block_label = p1_block_label
-			if is_local:
-				hand1.visible = true
-				hand2.visible = false
-				_hide_waiting_mask()
-			else:
-				hand1.visible = false
-				hand2.visible = false
-				# 不 return：回合逻辑仍要执行（抽牌/回内），但 UI 遮罩挡住操作
-				_show_waiting_mask("等待玩家2操作...")
-		else:
-			hand = hand2
-			player = player2
-			player_portrait = p2_portrait
-			player_name_label = p2_name_label
-			hp_label = p2_hp_label
-			energy_label = p1_energy_label
-			block_label = p1_block_label
-			if is_local:
-				hand1.visible = false
-				hand2.visible = true
-				_hide_waiting_mask()
-			else:
-				hand1.visible = false
-				hand2.visible = false
-				_show_waiting_mask("等待玩家1操作...")
-	else:
-		# 同屏双人模式：正常切换手牌可见
-		if p == 1:
 			hand = hand1
 			player = player1
 			player_portrait = p1_portrait
@@ -330,6 +300,7 @@ func _switch_to(p: int):
 			block_label = p1_block_label
 			hand1.visible = true
 			hand2.visible = false
+			_hide_waiting_mask()
 		else:
 			hand = hand2
 			player = player2
@@ -340,24 +311,54 @@ func _switch_to(p: int):
 			block_label = p1_block_label
 			hand1.visible = false
 			hand2.visible = true
-		_hide_waiting_mask()
+			_hide_waiting_mask()
+	else:
+		# 同屏模式：只显示当前激活玩家的手牌
+		if p == 1:
+			hand = hand1
+			player = player1
+			player_portrait = p1_portrait
+			player_name_label = p1_name_label
+			hp_label = p1_hp_label
+			energy_label = p1_energy_label
+			block_label = p1_block_label
+		else:
+			hand = hand2
+			player = player2
+			player_portrait = p2_portrait
+			player_name_label = p2_name_label
+			hp_label = p2_hp_label
+			energy_label = p1_energy_label
+			block_label = p1_block_label
+		
+		if GameData.is_dual_mode:
+			# 双人同屏：只显示当前激活玩家的手牌
+			hand1.visible = (p == 1)
+			hand2.visible = (p == 2)
+		else:
+			hand1.visible = true
+			hand2.visible = false
 	
 	_update_ui()
-	_update_turn_label("玩家%d的回合" % p)
+	_update_active_indicator()
 
 
 func _on_p1_portrait_clicked(event: InputEvent):
 	if event is InputEventMouseButton and event.pressed:
 		if NetworkManager.is_lan:
 			return
-		_switch_to(1)
+		if GameData.is_dual_mode and not NetworkManager.is_lan:
+			if not turn_manager.p1_ended:
+				_switch_to(1)
 
 
 func _on_p2_portrait_clicked(event: InputEvent):
 	if event is InputEventMouseButton and event.pressed:
 		if NetworkManager.is_lan:
 			return
-		_switch_to(2)
+		if GameData.is_dual_mode and not NetworkManager.is_lan:
+			if not turn_manager.p2_ended:
+				_switch_to(2)
 
 
 # ==============================
@@ -391,7 +392,11 @@ func _unhandled_input(event):
 	if event is InputEventMouseButton \
 	and event.pressed \
 	and event.button_index == MOUSE_BUTTON_LEFT:
-		hand.deselect()
+		if GameData.is_dual_mode and not NetworkManager.is_lan:
+			hand1.deselect()
+			hand2.deselect()
+		else:
+			hand.deselect()
 
 
 # ==============================
@@ -402,25 +407,56 @@ func _on_card_played(card):
 	if game_over:
 		return
 	
-	# 所有权校验：这张牌必须属于当前活跃玩家的手牌
-	if card.get_parent() != hand:
-		print("[拒绝] 牌 %s 不属于当前玩家" % card.card_data.card_id)
+	# 判断牌属于哪个玩家
+	var card_owner = 0
+	if card.get_parent() == hand1:
+		card_owner = 1
+	elif card.get_parent() == hand2:
+		card_owner = 2
+	else:
 		return
+	
+	# 双人同屏：只能出当前激活玩家的牌，已结束回合的不能出
+	if GameData.is_dual_mode and not NetworkManager.is_lan:
+		if card_owner != _active_player:
+			print("[拒绝] 当前激活的是P%d，不能出P%d的牌" % [_active_player, card_owner])
+			return
+		if turn_manager:
+			if card_owner == 1 and turn_manager.p1_ended:
+				return
+			if card_owner == 2 and turn_manager.p2_ended:
+				return
+	
+	# LAN 模式：主机只能出P1，客机只能出P2
+	if NetworkManager.is_lan:
+		if NetworkManager.is_host and card_owner != 1:
+			return
+		if not NetworkManager.is_host and card_owner != 2:
+			return
+		# 已结束回合的不能出
+		if turn_manager:
+			if card_owner == 1 and turn_manager.p1_ended:
+				return
+			if card_owner == 2 and turn_manager.p2_ended:
+				return
+	
+	# 切换别名到出牌方
+	_switch_to(card_owner)
 	
 	var _caller = "主机" if NetworkManager.is_host else "客机" if NetworkManager.is_lan else "单机"
-	print("[%s] P%d 出牌: %s" % [_caller, _active_player, card.card_data.card_id])
+	print("[%s] P%d 出牌: %s" % [_caller, card_owner, card.card_data.card_id])
 	
-	# 局域网路由
-	if NetworkManager.is_lan:
-		if not NetworkManager.is_host:
-			NetworkManager.rpc_id(1, "request_play", card.card_data.card_id, _active_player)
-			return
-		# 主机：执行 + 推快照
-		_execute_card(card)
-		NetworkManager.push_snapshot()
+	# LAN 模式：客机 P2 出牌 → 发 RPC 给主机执行
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		NetworkManager.rpc_id(1, "request_play", card.card_data.card_id, 2)
 		return
 	
+	# 主机 / 单机：直接执行
 	_execute_card(card)
+	
+	# 主机执行完后推快照
+	if NetworkManager.is_lan and NetworkManager.is_host:
+		NetworkManager.push_snapshot()
 
 
 	
@@ -451,6 +487,12 @@ func _execute_card(card):
 	last_played_card_id = data.card_id
 	if data.card_type == CardData.CardType.SKILL:
 		skill_played_this_turn += 1
+	
+	# ===== Lua 热更路径（PoC） =====
+	if LuaRuntime and LuaRuntime.enabled:
+		var lua_result = _try_execute_card_via_lua(card, data, actual_cost)
+		if lua_result:
+			return
 	
 	# ===== NEW: 效果系统（优先执行） =====
 	if data.has_effects():
@@ -769,6 +811,136 @@ func _execute_card(card):
 
 
 # ====================================================================
+# Lua 热更路径（PoC）
+# 尝试用 Lua 执行卡牌效果，成功返回 true，无实现返回 false
+# ====================================================================
+
+func _try_execute_card_via_lua(card, data: CardData, actual_cost: int) -> bool:
+	# 构建上下文
+	var ctx = {
+		"card_id": data.card_id,
+		"cost": data.cost,
+		"card_type": data.card_type,
+		"damage": data.damage,
+		"block": data.block,
+		"heal": data.heal,
+		"draw": data.draw,
+		"energy_gain": data.energy_gain,
+		"repeat": data.repeat,
+		"armor_break": data.armor_break,
+		"school": data.school,
+		"player_hp": player.hp,
+		"player_max_hp": player.max_hp,
+		"player_energy": player.energy,
+		"player_block": player.block,
+		"player_chan": player.chan,
+		"player_jianyi": player.jianyi,
+		"player_next_card_discount": player.next_card_discount,
+		"enemy_hp": enemy.hp,
+		"enemy_max_hp": enemy.max_hp,
+		"enemy_block": enemy.block,
+		"enemy_intent_type": enemy.intent_type,
+		"enemy_intent_value": enemy.intent_value,
+		"hand_size": hand.cards.size(),
+		"last_played_card_id": last_played_card_id,
+		"last_played_card_type": last_played_card_type,
+		"skill_played_this_turn": skill_played_this_turn,
+		"energy_used_this_turn": energy_used_this_turn,
+		"damage_bonus": GameData.get_damage_bonus(),
+		"block_bonus": GameData.get_block_bonus(),
+	}
+	
+	var result = LuaRuntime.execute_card(data.card_id, ctx)
+	if result.is_empty():
+		return false
+	
+	# 提取结果
+	var dmg = int(result.get("damage", 0))
+	var blk = int(result.get("block", 0))
+	var heal_amt = int(result.get("heal", 0))
+	var extra_draw = int(result.get("draw", 0))
+	var eg = int(result.get("energy_gain", 0))
+	var is_consumed = result.get("is_consumed", false)
+	var special = result.get("special", "")
+	var repeat_times = int(result.get("repeat_count", 1))
+	repeat_times = max(1, repeat_times)
+	
+	print("[Lua] %s → dmg=%d blk=%d heal=%d draw=%d energy=%d consumed=%s" % [
+		data.card_id, dmg, blk, heal_amt, extra_draw, eg, is_consumed])
+	
+	# 处理特殊效果
+	match special:
+		"chan_plus_1":
+			player.chan += 1
+			print("  [Lua] 禅意+1 (%d)" % player.chan)
+		"chan_reset":
+			print("  [Lua] 消耗%d层禅意" % player.chan)
+			player.chan = 0
+		"jianyi_plus_1":
+			player.jianyi += 1
+			print("  [Lua] 剑意+1 (%d)" % player.jianyi)
+		"jianyi_minus_1":
+			player.jianyi = max(0, player.jianyi - 1)
+			print("  [Lua] 剑意-1 (%d)" % player.jianyi)
+		"jianyi_reset":
+			print("  [Lua] 消耗%d层剑意" % player.jianyi)
+			player.jianyi = 0
+		_:
+			if special.begins_with("set_discount_"):
+				var discount_val = int(special.substr(len("set_discount_")))
+				next_two_cards_discount = discount_val
+				if consecutive_discount_used:
+					next_two_cards_discount = discount_val + 1
+					print("  [Lua] 虚实相生 连续技能 → 下%d减" % next_two_cards_discount)
+				else:
+					print("  [Lua] 虚实相生 下%d减" % next_two_cards_discount)
+	
+	# 龙象般若：未使用内力提供伤害加成
+	if player.power_longxiang and dmg > 0:
+		var bonus = player.energy * 2
+		dmg += bonus
+		print("  [Lua] 龙象般若 内力%d → 伤害+%d" % [player.energy, bonus])
+	
+	# 执行效果
+	for i in range(repeat_times):
+		if dmg > 0 or data.armor_break > 0:
+			enemy.take_damage(dmg, data.armor_break)
+		if blk > 0:
+			player.add_block(blk)
+		if heal_amt > 0:
+			player.heal(heal_amt)
+	
+	if eg > 0:
+		player.gain_energy(eg)
+	elif eg < 0:
+		var spend = -eg
+		player.energy = max(0, player.energy - spend)
+		energy_used_this_turn += spend
+		player.energy_changed.emit(player.energy, player.max_energy)
+	
+	# 抽牌
+	if extra_draw > 0:
+		var dp = draw_pile_p2 if _active_player == 2 else draw_pile
+		var dc = discard_pile_p2 if _active_player == 2 else discard_pile
+		_switch_draw(hand, dp, dc, extra_draw)
+	
+	# 弃牌/消耗
+	if not is_consumed:
+		var dc = discard_pile_p2 if _active_player == 2 else discard_pile
+		dc.append(card.card_data.card_id)
+	
+	hand.remove_card(card)
+	CardPool.release(card)
+	_update_deck_ui()
+	_update_sect_ui()
+	
+	if enemy.hp <= 0:
+		_on_battle_end(true)
+	
+	return true
+
+
+# ====================================================================
 # 效果系统（NEW）
 # 替代旧版 _execute_card 的 match 分支
 # 卡牌如有 effects 数组则走此路径，否则回退旧路径
@@ -970,17 +1142,46 @@ func _on_end_turn():
 	if game_over or turn_manager.current_turn == TurnManager.Turn.ENEMY:
 		return
 	
-	# LAN 模式：只能结束本地玩家的回合
+	# 双人同屏：标记当前玩家结束，双方都结束才进敌人回合
+	if GameData.is_dual_mode and not NetworkManager.is_lan:
+		var ender = _active_player
+		print("[结束回合] P%d 结束, p1_ended=%s p2_ended=%s" % [ender, turn_manager.p1_ended, turn_manager.p2_ended])
+		
+		if ender == 1:
+			turn_manager.p1_ended = true
+		else:
+			turn_manager.p2_ended = true
+		
+		_do_end_turn_for(ender)
+		_update_deck_ui()
+		
+		print("[结束回合] 更新后 p1_ended=%s p2_ended=%s" % [turn_manager.p1_ended, turn_manager.p2_ended])
+		
+		if turn_manager.p1_ended and turn_manager.p2_ended:
+			print("[结束回合] 双方都结束，进敌人回合")
+			turn_manager.end_player_turn()
+		else:
+			# 自动切换到未结束的玩家
+			if ender == 1 and not turn_manager.p2_ended:
+				_switch_to(2)
+			elif ender == 2 and not turn_manager.p1_ended:
+				_switch_to(1)
+			else:
+				_update_active_indicator()
+		return
+	
+	# LAN 模式：共享回合，双方各自结束
 	if NetworkManager.is_lan:
-		if NetworkManager.is_host and _active_player != 1:
-			return
-		if not NetworkManager.is_host and _active_player != 2:
-			return
-		if not NetworkManager.is_host:
-			NetworkManager.rpc_id(1, "request_end_turn", _active_player)
-			return
-		_do_end_turn()
-		NetworkManager.push_snapshot()
+		if NetworkManager.is_host:
+			# 主机：P1 结束
+			turn_manager.p1_ended = true
+			_do_end_turn_for(1)
+			if turn_manager.p1_ended and turn_manager.p2_ended:
+				turn_manager.end_player_turn()
+			NetworkManager.push_snapshot()
+		else:
+			# 客机：P2 请求结束
+			NetworkManager.rpc_id(1, "request_end_turn", 2)
 		return
 	
 	_do_end_turn()
@@ -1002,19 +1203,39 @@ func _do_end_turn():
 	turn_manager.end_player_turn()
 
 
+func _do_end_turn_for(player_id: int):
+	"""弃指定玩家手牌（不切换回合）"""
+	var target_hand = hand1 if player_id == 1 else hand2
+	var target_discard = discard_pile if player_id == 1 else discard_pile_p2
+	
+	if target_hand.selected_card != null:
+		target_hand.deselect()
+	
+	for c in target_hand.cards.duplicate():
+		if c.card_data.retain:
+			continue
+		target_discard.append(c.card_data.card_id)
+		target_hand.remove_card(c)
+		CardPool.release(c)
+
+
 # ==============================
 # 局域网 RPC 回调
 # NetworkManager 的 sync_play / sync_end_turn 调用这里
 # ==============================
 
 func network_execute_play(card_id: String, player_id: int):
-	"""RPC广播回调：执行远程玩家的出牌"""
+	"""RPC回调：客机请求P2出牌（仅主机执行）"""
+	if not NetworkManager.is_host:
+		return
+	var target_hand = hand1 if player_id == 1 else hand2
+	var target_player = player1 if player_id == 1 else player2
 	var saved_hand = hand
 	var saved_player = player
 	var saved_active = _active_player
 	
-	hand = hand1 if player_id == 1 else hand2
-	player = player1 if player_id == 1 else player2
+	hand = target_hand
+	player = target_player
 	_active_player = player_id
 	
 	for c in hand.cards:
@@ -1028,10 +1249,14 @@ func network_execute_play(card_id: String, player_id: int):
 
 
 func network_execute_end_turn(player_id: int):
-	"""RPC广播回调：执行远程玩家的结束回合"""
-	if player_id != _active_player:
-		_switch_to(player_id)
-	_do_end_turn()
+	"""RPC回调：客机请求P2结束回合（仅主机执行）"""
+	if not NetworkManager.is_host:
+		return
+	turn_manager.p2_ended = true
+	_do_end_turn_for(2)
+	if turn_manager.p1_ended and turn_manager.p2_ended:
+		turn_manager.end_player_turn()
+	NetworkManager.push_snapshot()
 
 
 # ==============================
@@ -1042,16 +1267,26 @@ var _waiting_mask: ColorRect = null
 
 
 func apply_snapshot(snap: Dictionary):
-	print("[客机] 收到快照: turn=%d p1_hand=%d p2_hand=%d" % [snap.get("turn", -1), snap.get("p1_hand_ids", []).size(), snap.get("p2_hand_ids", []).size()])
-	"""客机收到主机快照后更新UI"""
+	# 同步结束状态（客机可能没有 turn_manager）
+	var p1_ended = snap.get("p1_ended", false)
+	var p2_ended = snap.get("p2_ended", false)
+	if turn_manager:
+		turn_manager.p1_ended = p1_ended
+		turn_manager.p2_ended = p2_ended
+	
 	# 回合显示
-	match snap["turn"]:
+	var turn_val = snap.get("turn", -1)
+	match turn_val:
 		TurnManager.Turn.PLAYER1:
-			turn_label.text = "玩家1回合"
-		TurnManager.Turn.PLAYER2:
-			turn_label.text = "玩家2回合"
+			if p1_ended and not p2_ended:
+				turn_label.text = "等待P2结束回合..."
+			elif p2_ended and not p1_ended:
+				turn_label.text = "等待P1结束回合..."
+			else:
+				turn_label.text = "玩家回合"
 		TurnManager.Turn.ENEMY:
 			turn_label.text = "敌人回合"
+			end_turn_btn.disabled = true
 	_active_player = snap["active_player"]
 	_switch_to(snap["active_player"])
 	
@@ -1153,16 +1388,22 @@ func _hide_waiting_mask():
 # ==============================
 
 func _trigger_power_effects():
-	# 重置太极两仪标记
+	if LuaRuntime and LuaRuntime.enabled:
+		var ctx = {
+			"turn": turn_manager.current_turn if turn_manager else 0,
+			"is_player_turn": true,
+		}
+		LuaRuntime.battle_trigger_powers(ctx)
+		return
+	
+	# 回退：旧版 GDScript 逻辑
 	player.first_hit_this_turn = true
 	
-	# 达摩一苇：每回合+2禅意+3格挡
 	if player.power_damo:
 		player.chan += 2
 		player.add_block(3)
 		print("达摩一苇：禅意+2，格挡+3")
 	
-	# 八荒六合：每回合回3HP + 随机基础牌
 	if player.power_bahuang:
 		player.heal(3)
 		var base_pool = ["strike", "defend", "punch", "meditate"]
@@ -1179,14 +1420,10 @@ func _trigger_power_effects():
 			CardPool.release(card)
 			discard_pile.append(card_id)
 	
-	# 🦋 逍遥游：手牌上限+2，攻击/内力牌费用-1（通过标记实现，不修改卡面数据）
 	if player.power_xiaoyaoyou:
 		player.hand_limit_mod = 2
 		player.attack_discounted = true
 		print("逍遥游：手牌上限+2，攻击/内力牌费用-1")
-	
-	# 🦋 龙象般若：伤害加成已在 _on_card_played 计算
-	# 纯标记，每次攻击时生效
 
 
 # ==============================
@@ -1203,25 +1440,21 @@ func _on_battle_end(won):
 		_update_turn_label("胜利！")
 		GameData.add_cultivation(10)
 		GameData.add_gold(12)
-		var pool = [
-			"punch", "meditate", "light_step",
-			"double_strike", "tactics", "iron_wall", "vigor", "whirlwind",
-			"flowing_cloud_sword", "triple_stab", "sword_energy",
-			"iron_shirt", "vajra_fist", "golden_bell",
-			"strike", "defend", "bash", "heal",
-			# ---- 门派卡 ----
-			"sl_fist", "sl_iron", "sl_golden", "sl_arhat",
-			"wd_taiji", "wd_soft", "wd_steps", "wd_heavy",
-			"xy_beiming", "xy_lingbo", "xy_wuxiang", "xy_zhemel",
-			"xy_xiaoyaoyou", "xy_xingluo", "xy_fengjuan",
-			"xy_guicang", "xy_fuguang", "xy_yufeng",
-			"xy_duanliu", "xy_wanxiang", "xy_xiuli",
-			"xy_lianhuan", "xy_houfa", "xy_jinghua",
-			"xy_wujian", "xy_xushi", "xy_yixing",
-			"xy_hantan", "xy_qiguan", "xy_tuna",
-			"xy_longxiang", "xy_baoyuan", "xy_xixing",
-			"xy_guanxing", "xy_fange", "xy_yibizhi", "xy_duotian"
-		]
+		
+		# 局域网：主机给客机也加奖励，然后双方都显示地图
+		if NetworkManager.is_lan:
+			if NetworkManager.is_host:
+				# 主机选奖励
+				var pool = _get_reward_pool()
+				pool.shuffle()
+				var options = pool.slice(0, 3)
+				reward_screen.open(options)
+				# 通知客机也开奖励界面
+				NetworkManager.rpc("sync_reward_open", options)
+			return
+		
+		# 同屏/单机：正常开奖励界面
+		var pool = _get_reward_pool()
 		pool.shuffle()
 		var options = pool.slice(0, 3)
 		reward_screen.open(options)
@@ -1276,13 +1509,67 @@ func _on_reward_chosen(card_id: String):
 	GameData.add_card(card_id)
 	print("选择了奖励卡牌: %s" % card_id)
 	GameData.save_game()
-	_show_map()
+	if NetworkManager.is_lan:
+		if NetworkManager.is_host:
+			_show_map()
+			NetworkManager.rpc("sync_show_map")
+		else:
+			NetworkManager.rpc_id(1, "request_reward_done", card_id)
+	else:
+		_show_map()
 
 
 func _on_reward_skipped():
 	print("跳过了奖励")
 	GameData.save_game()
+	if NetworkManager.is_lan:
+		if NetworkManager.is_host:
+			_show_map()
+			NetworkManager.rpc("sync_show_map")
+		else:
+			NetworkManager.rpc_id(1, "request_reward_done", "")
+	else:
+		_show_map()
+
+
+# 客机收到：开奖励界面
+func network_reward_open(options: Array):
+	reward_screen.open(options)
+
+
+# 客机收到：显示地图
+func network_show_map():
 	_show_map()
+
+
+# 主机收到客机的奖励选择结果
+func network_reward_done(card_id: String):
+	if card_id != "":
+		GameData.add_card(card_id)
+	GameData.save_game()
+	_show_map()
+	NetworkManager.rpc("sync_show_map")
+
+
+func _get_reward_pool() -> Array:
+	return [
+		"punch", "meditate", "light_step",
+		"double_strike", "tactics", "iron_wall", "vigor", "whirlwind",
+		"flowing_cloud_sword", "triple_stab", "sword_energy",
+		"iron_shirt", "vajra_fist", "golden_bell",
+		"strike", "defend", "bash", "heal",
+		"sl_fist", "sl_iron", "sl_golden", "sl_arhat",
+		"wd_taiji", "wd_soft", "wd_steps", "wd_heavy",
+		"xy_beiming", "xy_lingbo", "xy_wuxiang", "xy_zhemel",
+		"xy_xiaoyaoyou", "xy_xingluo", "xy_fengjuan",
+		"xy_guicang", "xy_fuguang", "xy_yufeng",
+		"xy_duanliu", "xy_wanxiang", "xy_xiuli",
+		"xy_lianhuan", "xy_houfa", "xy_jinghua",
+		"xy_wujian", "xy_xushi", "xy_yixing",
+		"xy_hantan", "xy_qiguan", "xy_tuna",
+		"xy_longxiang", "xy_baoyuan", "xy_xixing",
+		"xy_guanxing", "xy_fange", "xy_yibizhi", "xy_duotian"
+	]
 
 
 func _show_map():
@@ -1297,18 +1584,22 @@ func _show_map():
 # ==============================
 
 func _on_node_selected(node_type: int):
-	# 局域网：只有主机能选节点
 	if NetworkManager.is_lan:
 		if NetworkManager.is_host:
+			# 主机：直接执行 + 广播给客机
+			_do_select_node(node_type)
 			NetworkManager.rpc("sync_select_node", node_type)
-			# 主机会通过 RPC 的 call_local 调 network_select_node
+			NetworkManager.push_snapshot()
+		else:
+			# 客机：请求主机执行
+			NetworkManager.rpc_id(1, "request_select_node", node_type)
 		return
 	
 	_do_select_node(node_type)
 
 
 func network_select_node(node_type: int):
-	"""客机收到主机同步后执行"""
+	"""RPC回调：执行节点选择"""
 	_do_select_node(node_type)
 
 
@@ -1418,6 +1709,7 @@ func _update_sect_ui():
 		sl.text = "  ".join(parts) if parts.size() > 0 else ""
 	chan_icon.visible = player.chan > 0
 	jianyi_icon.visible = player.jianyi > 0
+	_refresh_card_previews()
 
 func _update_deck_ui():
 	if GameData.is_dual_mode:
@@ -1431,12 +1723,47 @@ func _update_deck_ui():
 
 func _on_energy_changed(cur, max_val):
 	energy_label.text = "内力 %d/%d" % [cur, max_val]
+	_refresh_card_previews()
 
 func _on_hp_changed(cur, max_val):
 	hp_label.text = "HP %d/%d" % [cur, max_val]
 
 func _on_block_changed(cur):
 	block_label.text = "格挡 %d" % cur if cur > 0 else ""
+
+## 刷新所有手牌的预览数值（调用 Lua 计算实际伤害/格挡等）
+func _refresh_card_previews():
+	if not LuaRuntime or not LuaRuntime.enabled:
+		return
+	if not hand or not player or not enemy:
+		return
+	var ctx = _build_card_ctx()
+	for c in hand.cards:
+		if is_instance_valid(c):
+			c.update_preview(ctx)
+
+func _build_card_ctx() -> Dictionary:
+	return {
+		"card_id": "", "cost": 0, "card_type": 0,
+		"damage": 0, "block": 0, "heal": 0, "draw": 0,
+		"energy_gain": 0, "repeat": 0, "armor_break": 0, "school": "",
+		"player_hp": player.hp, "player_max_hp": player.max_hp,
+		"player_energy": player.energy, "player_max_energy": player.max_energy,
+		"player_block": player.block,
+		"player_chan": player.chan, "player_jianyi": player.jianyi,
+		"player_next_card_discount": player.next_card_discount,
+		"enemy_hp": enemy.hp, "enemy_max_hp": enemy.max_hp,
+		"enemy_block": enemy.block,
+		"enemy_intent_type": enemy.intent_type, "enemy_intent_value": enemy.intent_value,
+		"hand_size": hand.cards.size(),
+		"last_played_card_id": last_played_card_id,
+		"last_played_card_type": last_played_card_type,
+		"skill_played_this_turn": skill_played_this_turn,
+		"energy_used_this_turn": energy_used_this_turn,
+		"actual_cost": 0,
+		"damage_bonus": GameData.get_damage_bonus(),
+		"block_bonus": GameData.get_block_bonus(),
+	}
 
 func _on_enemy_hp_changed(cur, max_val):
 	enemy_hp_label.text = "敌人 HP %d/%d" % [cur, max_val]
@@ -1520,3 +1847,28 @@ func _update_floor_label():
 
 func _update_turn_label(suffix: String):
 	turn_label.text = "%s境 · %s" % [GameData.realm_names[GameData.current_realm], suffix]
+
+
+## 更新当前激活玩家的视觉指示（头像边框高亮 + 回合标签）
+func _update_active_indicator():
+	if not GameData.is_dual_mode or NetworkManager.is_lan:
+		# 单人/联机模式：不需要指示
+		_update_turn_label("玩家%d的回合" % _active_player)
+		return
+	
+	# 双人同屏：高亮当前激活玩家
+	p1_portrait.modulate = Color(1, 1, 1, 1.0) if _active_player == 1 else Color(0.5, 0.5, 0.5, 0.6)
+	p2_portrait.modulate = Color(1, 1, 1, 1.0) if _active_player == 2 else Color(0.5, 0.5, 0.5, 0.6)
+	
+	# 显示双方结束状态
+	var p1_status = " ✓" if turn_manager.p1_ended else ""
+	var p2_status = " ✓" if turn_manager.p2_ended else ""
+	
+	if turn_manager.p1_ended and not turn_manager.p2_ended:
+		_update_turn_label("玩家2回合%s (P1已结束)" % p2_status)
+	elif turn_manager.p2_ended and not turn_manager.p1_ended:
+		_update_turn_label("玩家1回合%s (P2已结束)" % p1_status)
+	elif turn_manager.p1_ended and turn_manager.p2_ended:
+		_update_turn_label("敌人回合...")
+	else:
+		_update_turn_label("玩家%d回合 (点击头像切换)" % _active_player)

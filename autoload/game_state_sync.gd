@@ -1,13 +1,15 @@
 extends Node
 
 # 构建当前游戏状态快照（只含客机渲染需要的数据）
-static func build_snapshot(main_node: Node) -> Dictionary:
+func build_snapshot(main_node: Node) -> Dictionary:
 	var tm = main_node.turn_manager
 	var turn_val = tm.current_turn if tm and tm.active else -1
 	
 	var snap = {
 		"turn": turn_val,
 		"active_player": main_node._active_player,
+		"p1_ended": tm.p1_ended if tm else false,
+		"p2_ended": tm.p2_ended if tm else false,
 		"p1_hp": main_node.player1.hp,
 		"p1_max_hp": main_node.player1.max_hp,
 		"p1_block": main_node.player1.block,

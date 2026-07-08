@@ -13,6 +13,13 @@ signal clicked()
 
 func setup(data: CardData):
 	card_data = data
+	_refresh_display()
+
+
+func _refresh_display():
+	if not card_data:
+		return
+	var data = card_data
 	
 	# ---- 卡牌名（含门派标识） ----
 	var school_tag = ""
@@ -24,27 +31,20 @@ func setup(data: CardData):
 	$DescLabel.text = data.description
 	$RetainLabel.visible = data.retain
 	
-	# ---- 文字描边（保证在任何底图上都清晰） ----
-	# 卡牌名：白字 + 黑描边
+	# ---- 文字描边 ----
 	$NameLabel.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))
 	$NameLabel.add_theme_constant_override("outline_size", 2)
 	$NameLabel.add_theme_color_override("font_color", Color(1, 1, 1, 1))
-	
-	# 费用：金字 + 黑描边
 	$CostLabel.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))
 	$CostLabel.add_theme_constant_override("outline_size", 2)
-	
-	# 描述：亮白字 + 细描边 + 稍大字号
 	$DescLabel.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	$DescLabel.add_theme_constant_override("outline_size", 1)
 	$DescLabel.add_theme_color_override("font_color", Color(1, 1, 1, 1))
 	$DescLabel.add_theme_font_size_override("font_size", 11)
-	
-	# 保留标签：黄字 + 描边
 	$RetainLabel.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))
 	$RetainLabel.add_theme_constant_override("outline_size", 1)
 	
-	# ---- 卡牌类型色（半透明叠加在牌框图上） ----
+	# ---- 卡牌类型色 ----
 	match data.card_type:
 		CardData.CardType.ATTACK:
 			$TypeOverlay.color = Color(0.3, 0.15, 0.15, 0.2)
@@ -56,6 +56,60 @@ func setup(data: CardData):
 			$TypeOverlay.color = Color(0.15, 0.3, 0.2, 0.2)
 		CardData.CardType.MOVEMENT:
 			$TypeOverlay.color = Color(0.3, 0.2, 0.3, 0.2)
+
+
+## 用 Lua 预览实际效果，更新描述显示
+func update_preview(ctx: Dictionary):
+	if not card_data:
+		return
+	if not LuaRuntime or not LuaRuntime.enabled:
+		_refresh_display()
+		return
+	
+	# 把卡牌自身数据合并进 ctx
+	var full_ctx = ctx.duplicate()
+	full_ctx["card_id"] = card_data.card_id
+	full_ctx["cost"] = card_data.cost
+	full_ctx["card_type"] = card_data.card_type
+	full_ctx["damage"] = card_data.damage
+	full_ctx["block"] = card_data.block
+	full_ctx["heal"] = card_data.heal
+	full_ctx["draw"] = card_data.draw
+	full_ctx["energy_gain"] = card_data.energy_gain
+	full_ctx["repeat"] = card_data.repeat
+	full_ctx["armor_break"] = card_data.armor_break
+	full_ctx["school"] = card_data.school
+	
+	var result = LuaRuntime.preview_card(card_data.card_id, full_ctx)
+	if result.is_empty():
+		_refresh_display()
+		return
+	
+	# 基础描述
+	var desc = card_data.description
+	
+	# 构建预览数值后缀
+	var parts = []
+	var dmg = int(result.get("damage", 0))
+	var blk = int(result.get("block", 0))
+	var heal_amt = int(result.get("heal", 0))
+	var draw = int(result.get("draw", 0))
+	var eg = int(result.get("energy_gain", 0))
+	var rpt = int(result.get("repeat_count", 1))
+	
+	if dmg > 0:
+		var s = "伤害%d" % dmg
+		if rpt > 1: s += "×%d" % rpt
+		parts.append(s)
+	if blk > 0: parts.append("格挡%d" % blk)
+	if heal_amt > 0: parts.append("回血%d" % heal_amt)
+	if draw > 0: parts.append("抽%d" % draw)
+	if eg > 0: parts.append("内力+%d" % eg)
+	
+	if parts.size() > 0:
+		$DescLabel.text = desc + "\n[实际: " + ", ".join(parts) + "]"
+	else:
+		$DescLabel.text = desc
 
 
 func _gui_input(event):

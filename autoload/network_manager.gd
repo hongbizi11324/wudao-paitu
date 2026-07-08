@@ -213,8 +213,19 @@ func _safe_call(method: String, args: Array):
 
 
 # 地图节点同步
-@rpc("authority", "call_local", "reliable")
+# 主机 → 客机：广播选节点结果（不 call_local，主机已直接执行）
+@rpc("authority", "reliable")
 func sync_select_node(node_type: int):
+	var main = get_tree().current_scene
+	if main and main.has_method("network_select_node"):
+		main.network_select_node(node_type)
+
+
+# 客机请求选节点 → 主机执行并广播
+@rpc("any_peer", "reliable")
+func request_select_node(node_type: int):
+	if not is_host:
+		return
 	var main = get_tree().current_scene
 	if main and main.has_method("network_select_node"):
 		main.network_select_node(node_type)
@@ -243,7 +254,35 @@ func sync_turn(turn_id: int):
 	main.network_sync_turn(turn_id)
 
 # ==============================
-# 🆕 状态快照同步
+# 奖励/地图同步
+# ==============================
+
+# 主机 → 客机：开奖励界面
+@rpc("authority", "reliable")
+func sync_reward_open(options: Array):
+	var main = get_tree().current_scene
+	if main and main.has_method("network_reward_open"):
+		main.network_reward_open(options)
+
+# 主机 → 客机：显示地图
+@rpc("authority", "reliable")
+func sync_show_map():
+	var main = get_tree().current_scene
+	if main and main.has_method("network_show_map"):
+		main.network_show_map()
+
+# 客机 → 主机：奖励选择完成
+@rpc("any_peer", "reliable")
+func request_reward_done(card_id: String):
+	if not is_host:
+		return
+	var main = get_tree().current_scene
+	if main and main.has_method("network_reward_done"):
+		main.network_reward_done(card_id)
+
+
+# ==============================
+# 状态快照同步
 # ==============================
 
 func push_snapshot():

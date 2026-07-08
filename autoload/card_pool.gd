@@ -24,10 +24,10 @@ func acquire(scene) -> Node:
 			return obj
 		i += 1
 	
-	var obj = scene.instantiate()
-	pool.append(obj)
-	_active[obj.get_instance_id()] = true
-	return obj
+	var new_obj = scene.instantiate()
+	pool.append(new_obj)
+	_active[new_obj.get_instance_id()] = true
+	return new_obj
 
 
 func release(node):
