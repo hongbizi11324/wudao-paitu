@@ -44,6 +44,24 @@ func _ready():
 	
 	$BottomBar/BackBtn.pressed.connect(_on_back)
 	$BottomBar/ConfirmBtn.pressed.connect(_on_confirm)
+	
+	# LAN 客机：显示等待遮罩，禁止操作
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		$BottomBar/BackBtn.disabled = true
+		$BottomBar/ConfirmBtn.disabled = true
+		var mask = ColorRect.new()
+		mask.color = Color(0, 0, 0, 0.7)
+		mask.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		mask.mouse_filter = Control.MOUSE_FILTER_STOP
+		var label = Label.new()
+		label.text = "等待主机选择角色..."
+		label.add_theme_color_override("font_color", Color.WHITE)
+		label.add_theme_font_size_override("font_size", 28)
+		label.anchor_right = 1.0; label.anchor_bottom = 1.0
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		mask.add_child(label)
+		add_child(mask)
 
 
 # ==============================
@@ -249,10 +267,6 @@ func _start_dual_run(school_p2: String):
 	GameData.selected_character = saved_c1
 	GameData.selected_character_2 = saved_c2
 	
-	# 局域网：通知客机进游戏
-	if NetworkManager.is_lan and NetworkManager.is_host:
-		NetworkManager.rpc("sync_start_game", saved_c1, saved_c2, GameData.player_deck.duplicate(), GameData.player2_deck.duplicate())
-	
 	# 玩家1的门派牌
 	match _p1_school:
 		"shaolin":
@@ -270,6 +284,11 @@ func _start_dual_run(school_p2: String):
 			GameData.add_card_to_player2("wd_taiji"); GameData.add_card_to_player2("wd_soft")
 		"xiaoyao":
 			GameData.add_card_to_player2("xy_beiming"); GameData.add_card_to_player2("xy_lingbo")
+	
+	# 局域网：通知客机进游戏（学校牌已加入后再同步牌组）
+	NetworkManager.host_in_select = false
+	if NetworkManager.is_lan and NetworkManager.is_host:
+		NetworkManager.rpc("sync_start_game", saved_c1, saved_c2, GameData.player_deck.duplicate(), GameData.player2_deck.duplicate())
 	
 	# 启动双人战斗场景
 	get_tree().change_scene_to_file("res://scenes/main.tscn")

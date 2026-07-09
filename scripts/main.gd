@@ -133,10 +133,30 @@ func _ready():
 	rest_screen.closed.connect(_on_rest_closed)
 	event_screen.closed.connect(_on_event_closed)
 	
+	# 断线/重连信号
+	if not NetworkManager.player_disconnected.is_connected(_on_player_disconnected):
+		NetworkManager.player_disconnected.connect(_on_player_disconnected)
+	if not NetworkManager.player_reconnected.is_connected(_on_player_reconnected):
+		NetworkManager.player_reconnected.connect(_on_player_reconnected)
+	
 	# 从存档恢复：直接显示地图
 	# 局域网：用共享种子保证地图/牌序一致
 	if NetworkManager.is_lan:
 		seed(NetworkManager.shared_seed)
+	
+	# 局域网客机重连：直接初始化战斗，等主机推快照
+	if NetworkManager.is_lan and not NetworkManager.is_host and GameData.loading_save:
+		player1.init()
+		player2.init(true)
+		_start_battle()
+		draw_pile = GameData.player_deck.duplicate()
+		draw_pile.shuffle()
+		if GameData.is_dual_mode:
+			draw_pile_p2 = GameData.player2_deck.duplicate()
+			draw_pile_p2.shuffle()
+		_show_waiting_mask("重连成功，同步状态...")
+		return
+	
 	if GameData.loading_save:
 		GameData.loading_save = false
 		node_map.open()
@@ -578,7 +598,7 @@ func _execute_card(card):
 				var cpath = "res://resources/cards/%s.tres" % copied_id
 				var cdata = load(cpath)
 				var cscene = load("res://scenes/card.tscn")
-				var new_card = cscene.instantiate()
+				var new_card = CardPool.acquire(cscene)
 				new_card.setup(cdata)
 				hand.add_card(new_card)
 				print("小无相功 复制 -> %s" % copied_id)
@@ -685,7 +705,7 @@ func _execute_card(card):
 				var last_data = load(last_path)
 				if last_data and last_data.card_type != CardData.CardType.POWER:
 					var cscene = load("res://scenes/card.tscn")
-					var new_card = cscene.instantiate()
+					var new_card = CardPool.acquire(cscene)
 					new_card.setup(last_data)
 					hand.add_card(new_card)
 					print("镜花水月 复制 -> %s" % last_played_card_id)
@@ -1003,7 +1023,7 @@ func _handle_scripted_effect(script_id: String, ctx: EffectContext, card_node):
 				var cpath = "res://resources/cards/%s.tres" % copied_id
 				var cdata = load(cpath)
 				var cscene = load("res://scenes/card.tscn")
-				var new_card = cscene.instantiate()
+				var new_card = CardPool.acquire(cscene)
 				new_card.setup(cdata)
 				hand.add_card(new_card)
 				print("小无相功 复制 -> %s" % copied_id)
@@ -1016,7 +1036,7 @@ func _handle_scripted_effect(script_id: String, ctx: EffectContext, card_node):
 				var last_data = load(last_path)
 				if last_data and last_data.card_type != CardData.CardType.POWER:
 					var cscene = load("res://scenes/card.tscn")
-					var new_card = cscene.instantiate()
+					var new_card = CardPool.acquire(cscene)
 					new_card.setup(last_data)
 					hand.add_card(new_card)
 					print("镜花水月 复制 -> %s" % ctx.last_played_card_id)
@@ -1139,7 +1159,7 @@ func _apply_effect_results(card_node, data: CardData, ctx: EffectContext):
 
 
 func _on_end_turn():
-	if game_over or turn_manager.current_turn == TurnManager.Turn.ENEMY:
+	if game_over or not turn_manager or turn_manager.current_turn == TurnManager.Turn.ENEMY:
 		return
 	
 	# 双人同屏：标记当前玩家结束，双方都结束才进敌人回合
@@ -1551,6 +1571,57 @@ func network_reward_done(card_id: String):
 	NetworkManager.rpc("sync_show_map")
 
 
+# 主机收到客机的休息点选择
+func network_rest_done(next_action: String):
+	match next_action:
+		"heal":
+			GameData.heal_player(0.3)
+		"cultivate":
+			GameData.add_cultivation(10)
+			GameData.add_gold(10)
+	GameData.save_game()
+	_show_map()
+	NetworkManager.rpc("sync_show_map")
+
+
+# 主机收到客机的事件选择
+func network_event_done(_event_id: String, action: String):
+	# 主机端也执行一次事件效果（客机的选择）
+	_apply_event_action(action)
+	GameData.save_game()
+	_show_map()
+	NetworkManager.rpc("sync_show_map")
+
+
+# 主机收到客机的商店完成
+func network_shop_done():
+	GameData.save_game()
+	_show_map()
+	NetworkManager.rpc("sync_show_map")
+
+
+func _apply_event_action(action: String):
+	match action:
+		"buy_discount":
+			if GameData.gold >= 5:
+				GameData.spend_gold(5)
+				var card_id = GameData.get_random_new_card()
+				GameData.add_card(card_id)
+		"help":
+			GameData.player_hp = maxi(1, GameData.player_hp - 5)
+			var card_id = GameData.get_random_new_card()
+			GameData.add_card(card_id)
+		"open":
+			GameData.add_gold(20)
+			GameData.add_cultivation(5)
+		"heal":
+			GameData.player_hp = mini(GameData.player_max_hp, GameData.player_hp + 15)
+		"cultivate":
+			GameData.add_cultivation(15)
+		"skip":
+			pass
+
+
 func _get_reward_pool() -> Array:
 	return [
 		"punch", "meditate", "light_step",
@@ -1606,7 +1677,6 @@ func network_select_node(node_type: int):
 func _do_select_node(node_type: int):
 	match node_type:
 		GameData.NodeType.BATTLE_NORMAL, GameData.NodeType.BATTLE_ELITE:
-			# 战斗节点 → 进入战斗场景
 			get_tree().reload_current_scene()
 		
 		GameData.NodeType.SHOP:
@@ -1632,10 +1702,17 @@ func _on_rest_closed(next_action: String):
 			print("休息点·冥想: 修为+10, 金币+10")
 	
 	GameData.save_game()
-	_show_map()
+	if NetworkManager.is_lan:
+		if NetworkManager.is_host:
+			_show_map()
+			NetworkManager.rpc("sync_show_map")
+		else:
+			NetworkManager.rpc_id(1, "request_rest_done", next_action)
+	else:
+		_show_map()
 
 
-func _on_event_closed(_event_id: String, action: String):
+func _on_event_closed(event_id: String, action: String):
 	match action:
 		"buy_discount":
 			if GameData.gold >= 5:
@@ -1670,7 +1747,14 @@ func _on_event_closed(_event_id: String, action: String):
 			print("事件: 跳过了")
 	
 	GameData.save_game()
-	_show_map()
+	if NetworkManager.is_lan:
+		if NetworkManager.is_host:
+			_show_map()
+			NetworkManager.rpc("sync_show_map")
+		else:
+			NetworkManager.rpc_id(1, "request_event_done", event_id, action)
+	else:
+		_show_map()
 
 
 # ==============================
@@ -1683,7 +1767,14 @@ func _open_shop():
 
 func _on_shop_done():
 	GameData.save_game()
-	_show_map()
+	if NetworkManager.is_lan:
+		if NetworkManager.is_host:
+			_show_map()
+			NetworkManager.rpc("sync_show_map")
+		else:
+			NetworkManager.rpc_id(1, "request_shop_done")
+	else:
+		_show_map()
 
 
 # ==============================
@@ -1872,3 +1963,27 @@ func _update_active_indicator():
 		_update_turn_label("敌人回合...")
 	else:
 		_update_turn_label("玩家%d回合 (点击头像切换)" % _active_player)
+
+
+# ==============================
+# 断线 / 重连处理
+# ==============================
+
+func _on_player_disconnected():
+	if NetworkManager.is_host:
+		# 主机：显示提示，游戏暂停
+		_show_waiting_mask("P2已断开，等待重连...")
+		print("[断线] 主机等待客机重连")
+	else:
+		# 客机：回主菜单
+		print("[断线] 客机返回主菜单")
+		get_tree().change_scene_to_file("res://scenes/start_screen.tscn")
+
+
+func _on_player_reconnected():
+	if NetworkManager.is_host:
+		# 主机：推送重连数据
+		print("[重连] 客机重连中，推送快照...")
+		NetworkManager.send_reconnect_data()
+		_hide_waiting_mask()
+		_update_turn_label("P2已重连")

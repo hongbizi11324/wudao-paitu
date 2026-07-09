@@ -15,10 +15,13 @@ var is_lan: bool = false
 var is_host: bool = false
 var shared_seed: int = 0
 var p2_peer_id: int = 0
+var p2_reconnecting: bool = false  # 客机是否正在重连
+var host_in_select: bool = false   # 主机是否在选人界面
 
 signal game_ready()
 signal game_start_ready()
 signal player_disconnected()
+signal player_reconnected()
 
 var _timeout_timer: Timer = null
 
@@ -105,14 +108,30 @@ func _on_peer_connected(id: int):
 	p2_peer_id = id
 	print("[网络] 玩家已连接 (ID=%d)" % id)
 	rpc_id(id, "_receive_seed", shared_seed)
+	
+	# 如果已有存档（重连场景），推送完整状态恢复
+	if is_host and GameData.has_save():
+		p2_reconnecting = true
+		print("[网络] 检测到存档，准备推送重连快照...")
+		player_reconnected.emit()
+	elif is_host and host_in_select:
+		# 主机在选人界面：通知客机也进选人
+		rpc_id(id, "sync_enter_select_school")
 
 
 func _on_peer_disconnected(id: int):
 	print("[网络] 玩家断开连接 (ID=%d)" % id)
 	if p2_peer_id == id:
 		p2_peer_id = 0
-	player_disconnected.emit()
-	cleanup()
+	if is_host:
+		# 主机：不 cleanup，保持服务器开放等重连
+		GameData.save_game()
+		player_disconnected.emit()
+		print("[网络] 主机保持运行，等待客机重连...")
+	else:
+		# 客机：清理并回主菜单
+		cleanup()
+		player_disconnected.emit()
 
 
 # ── 客机接收种子 ──
@@ -123,6 +142,31 @@ func _receive_seed(seed_val: int):
 	seed(seed_val)
 	print("[网络] 收到种子=%d" % seed_val)
 	game_ready.emit()
+
+
+# ── 主机通知客机进入选人界面 ──
+@rpc("authority", "reliable")
+func sync_enter_select_school():
+	var main = get_tree().current_scene
+	if main and main.has_method("network_enter_select_school"):
+		main.network_enter_select_school()
+
+
+# ── 主机推送重连数据 ──
+func send_reconnect_data():
+	if not is_host or p2_peer_id == 0:
+		return
+	# 同步角色和牌组
+	rpc_id(p2_peer_id, "sync_start_game",
+		GameData.selected_character,
+		GameData.selected_character_2,
+		GameData.player_deck,
+		GameData.player2_deck
+	)
+	# 等一帧后推送快照（等客机场景加载完成）
+	await get_tree().create_timer(0.5).timeout
+	push_snapshot()
+	print("[网络] 重连快照已推送")
 
 
 # ==============================
@@ -279,6 +323,33 @@ func request_reward_done(card_id: String):
 	var main = get_tree().current_scene
 	if main and main.has_method("network_reward_done"):
 		main.network_reward_done(card_id)
+
+# 客机 → 主机：休息点选择完成
+@rpc("any_peer", "reliable")
+func request_rest_done(next_action: String):
+	if not is_host:
+		return
+	var main = get_tree().current_scene
+	if main and main.has_method("network_rest_done"):
+		main.network_rest_done(next_action)
+
+# 客机 → 主机：事件选择完成
+@rpc("any_peer", "reliable")
+func request_event_done(event_id: String, action: String):
+	if not is_host:
+		return
+	var main = get_tree().current_scene
+	if main and main.has_method("network_event_done"):
+		main.network_event_done(event_id, action)
+
+# 客机 → 主机：商店完成
+@rpc("any_peer", "reliable")
+func request_shop_done():
+	if not is_host:
+		return
+	var main = get_tree().current_scene
+	if main and main.has_method("network_shop_done"):
+		main.network_shop_done()
 
 
 # ==============================

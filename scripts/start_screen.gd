@@ -22,10 +22,7 @@ func _ready():
 	_quit_orig_scale = $QuitBtn.scale
 	_update_music_btn()
 	
-	# "继续游戏"按钮
 	_continue_btn.pressed.connect(_on_continue)
-	
-	# 局域网按钮
 	$HostBtn.pressed.connect(_on_host)
 	$JoinBtn.pressed.connect(_on_join)
 
@@ -35,12 +32,10 @@ func _on_start_hover():
 	tw.tween_property($BtnStart, "scale", _start_orig_scale * 1.1, 0.1)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
-
 func _on_start_unhover():
 	var tw = create_tween()
 	tw.tween_property($BtnStart, "scale", _start_orig_scale, 0.08)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-
 
 func _on_start():
 	GameData.is_dual_mode = false
@@ -48,45 +43,38 @@ func _on_start():
 		GameData.delete_save()
 	get_tree().change_scene_to_file("res://scenes/select_school.tscn")
 
-
 func _on_dual():
 	GameData.is_dual_mode = true
 	if GameData.has_save():
 		GameData.delete_save()
 	get_tree().change_scene_to_file("res://scenes/select_school.tscn")
 
-
 func _on_continue():
 	if not GameData.has_save():
-		# 显示提示
-		var toast = Label.new()
-		toast.text = "没有旧存档"
-		toast.add_theme_font_size_override("font_size", 24)
-		toast.add_theme_color_override("font_color", Color(1, 0.8, 0.2))
-		toast.position = Vector2(540, 500)
-		add_child(toast)
-		var tw = create_tween()
-		tw.tween_property(toast, "modulate", Color(1,1,1,0), 1.5).set_delay(1.0)
-		tw.finished.connect(toast.queue_free)
+		_toast("没有旧存档")
 		return
 	
-	# 加载存档 → 进入主场景（自动恢复地图）
+	if NetworkManager.is_host and not NetworkManager.p2_peer_id:
+		GameData.load_game()
+		GameData.is_dual_mode = true
+		GameData.loading_save = true
+		get_tree().change_scene_to_file("res://scenes/main.tscn")
+		_toast("等待P2重连...")
+		return
+	
 	GameData.load_game()
 	GameData.is_dual_mode = false
 	GameData.loading_save = true
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
-
 func _on_host():
-	# 局域网主机：先进选人界面
 	if NetworkManager.host_game():
 		GameData.is_dual_mode = true
 		GameData.new_dual_run()
+		NetworkManager.host_in_select = true
 		get_tree().change_scene_to_file("res://scenes/select_school.tscn")
 
-
 func _on_join():
-	# 局域网加入
 	var ip = $IpEdit.text.strip_edges()
 	if ip.is_empty():
 		_toast("请输入主机IP地址")
@@ -96,18 +84,16 @@ func _on_join():
 			NetworkManager.game_ready.connect(_on_network_ready)
 		_toast("正在连接...")
 
-
 func _on_network_ready():
-	# 种子同步完成，等待主机通知开始
-	_toast("已连接，等待主机选择角色...")
-	NetworkManager.game_start_ready.connect(_on_game_start)
-
+	_toast("已连接，等待主机会话...")
+	if not NetworkManager.game_start_ready.is_connected(_on_game_start):
+		NetworkManager.game_start_ready.connect(_on_game_start)
 
 func _on_game_start():
-	# 主机通知游戏开始（数据已由 sync_start_game 同步，不要再调 new_dual_run）
 	GameData.is_dual_mode = true
+	if GameData.has_save():
+		GameData.loading_save = true
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
-
 
 func _toast(msg: String):
 	var toast = Label.new()
@@ -120,22 +106,18 @@ func _toast(msg: String):
 	tw.tween_property(toast, "modulate", Color(1,1,1,0), 1.5).set_delay(0.8)
 	tw.finished.connect(toast.queue_free)
 
-
 func _on_test():
 	get_tree().change_scene_to_file("res://scenes/test_deck.tscn")
-
 
 func _on_quit_hover():
 	var tw = create_tween()
 	tw.tween_property($QuitBtn, "scale", _quit_orig_scale * 1.1, 0.1)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
-
 func _on_quit_unhover():
 	var tw = create_tween()
 	tw.tween_property($QuitBtn, "scale", _quit_orig_scale, 0.08)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-
 
 func _on_dual_hover():
 	var tw = create_tween()
@@ -145,15 +127,20 @@ func _on_dual_unhover():
 	var tw = create_tween()
 	tw.tween_property($DualBtn, "scale", Vector2(1, 1), 0.08)
 
-
 func _on_music_toggle():
 	BgmManager.toggle()
 	_update_music_btn()
 
-
 func _update_music_btn():
 	$MusicBtn.text = "🔊" if BgmManager.is_enabled else "🔇"
 
-
 func _on_quit():
 	get_tree().quit()
+
+# RPC回调：主机通知客机进入选人界面
+func network_enter_select_school():
+	GameData.is_dual_mode = true
+	# 客机也要监听 game_start_ready，选人完成后主机会发 sync_start_game
+	if not NetworkManager.game_start_ready.is_connected(_on_game_start):
+		NetworkManager.game_start_ready.connect(_on_game_start)
+	get_tree().change_scene_to_file("res://scenes/select_school.tscn")
