@@ -144,17 +144,22 @@ func _ready():
 	if NetworkManager.is_lan:
 		seed(NetworkManager.shared_seed)
 	
-	# 局域网客机重连：直接初始化战斗，等主机推快照
-	if NetworkManager.is_lan and not NetworkManager.is_host and GameData.loading_save:
-		player1.init()
-		player2.init(true)
-		_start_battle()
-		draw_pile = GameData.player_deck.duplicate()
-		draw_pile.shuffle()
-		if GameData.is_dual_mode:
-			draw_pile_p2 = GameData.player2_deck.duplicate()
-			draw_pile_p2.shuffle()
-		_show_waiting_mask("重连成功，同步状态...")
+	# 局域网客机：不执行任何逻辑，等主机推快照
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		if GameData.loading_save:
+			GameData.loading_save = false
+			player1.init()
+			player2.init(true)
+			_start_battle()
+			draw_pile = GameData.player_deck.duplicate()
+			draw_pile.shuffle()
+			if GameData.is_dual_mode:
+				draw_pile_p2 = GameData.player2_deck.duplicate()
+				draw_pile_p2.shuffle()
+			_show_waiting_mask("重连成功，同步状态...")
+		else:
+			_show_waiting_mask("等待主机同步状态...")
+		_scene_loaded = true
 		return
 	
 	if GameData.loading_save:
@@ -166,6 +171,9 @@ func _ready():
 	if GameData.current_floor == 1 and not GameData.map_active:
 		GameData.generate_new_act()
 		node_map.open()
+		# LAN 主机：通知客机也打开地图
+		if NetworkManager.is_lan and NetworkManager.is_host:
+			NetworkManager.rpc("sync_show_map")
 		return
 	
 	# 初始化
@@ -836,6 +844,9 @@ func _execute_card(card):
 # ====================================================================
 
 func _try_execute_card_via_lua(card, data: CardData, actual_cost: int) -> bool:
+	# ===== 事务快照：Lua 报错时回滚 =====
+	var snap = _snapshot_battle_state()
+	
 	# 构建上下文
 	var ctx = {
 		"card_id": data.card_id,
@@ -872,6 +883,8 @@ func _try_execute_card_via_lua(card, data: CardData, actual_cost: int) -> bool:
 	
 	var result = LuaRuntime.execute_card(data.card_id, ctx)
 	if result.is_empty():
+		# Lua 报错或无实现 → 回滚到执行前
+		_rollback_battle_state(snap)
 		return false
 	
 	# 提取结果
@@ -958,6 +971,114 @@ func _try_execute_card_via_lua(card, data: CardData, actual_cost: int) -> bool:
 		_on_battle_end(true)
 	
 	return true
+
+
+# ===== 事务快照：保存/回滚战斗状态 =====
+
+func _snapshot_battle_state() -> Dictionary:
+	# 保存手牌ID列表（按玩家分）
+	var p1_hand_ids: Array = []
+	var p2_hand_ids: Array = []
+	for c in hand1.cards:
+		p1_hand_ids.append(c.card_data.card_id)
+	for c in hand2.cards:
+		p2_hand_ids.append(c.card_data.card_id)
+	
+	return {
+		"p1_hp": player1.hp, "p1_block": player1.block, "p1_energy": player1.energy,
+		"p1_chan": player1.chan, "p1_jianyi": player1.jianyi,
+		"p1_next_discount": player1.next_card_discount,
+		"p1_hand_ids": p1_hand_ids,
+		"p2_hp": player2.hp, "p2_block": player2.block, "p2_energy": player2.energy,
+		"p2_chan": player2.chan, "p2_jianyi": player2.jianyi,
+		"p2_next_discount": player2.next_card_discount,
+		"p2_hand_ids": p2_hand_ids,
+		"enemy_hp": enemy.hp, "enemy_block": enemy.block,
+		"draw_pile": draw_pile.duplicate(),
+		"discard_pile": discard_pile.duplicate(),
+		"draw_pile_p2": draw_pile_p2.duplicate() if draw_pile_p2 else [],
+		"discard_pile_p2": discard_pile_p2.duplicate() if discard_pile_p2 else [],
+		"next_two_cards_discount": next_two_cards_discount,
+		"consecutive_discount_used": consecutive_discount_used,
+		"skill_played_this_turn": skill_played_this_turn,
+		"energy_used_this_turn": energy_used_this_turn,
+		"last_played_card_type": last_played_card_type,
+		"last_played_card_id": last_played_card_id,
+	}
+
+
+func _rollback_battle_state(snap: Dictionary):
+	# 恢复玩家状态
+	player1.hp = snap["p1_hp"]; player1.block = snap["p1_block"]
+	player1.energy = snap["p1_energy"]; player1.chan = snap["p1_chan"]
+	player1.jianyi = snap["p1_jianyi"]; player1.next_card_discount = snap["p1_next_discount"]
+	player1.hp_changed.emit(player1.hp, player1.max_hp)
+	player1.energy_changed.emit(player1.energy, player1.max_energy)
+	player1.block_changed.emit(player1.block)
+	
+	player2.hp = snap["p2_hp"]; player2.block = snap["p2_block"]
+	player2.energy = snap["p2_energy"]; player2.chan = snap["p2_chan"]
+	player2.jianyi = snap["p2_jianyi"]; player2.next_card_discount = snap["p2_next_discount"]
+	
+	# 恢复敌人状态
+	enemy.hp = snap["enemy_hp"]; enemy.block = snap["enemy_block"]
+	enemy.hp_changed.emit(enemy.hp, enemy.max_hp)
+	enemy.block_changed.emit(enemy.block)
+	
+	# 恢复牌堆
+	draw_pile = snap["draw_pile"].duplicate()
+	discard_pile = snap["discard_pile"].duplicate()
+	draw_pile_p2 = snap["draw_pile_p2"].duplicate()
+	discard_pile_p2 = snap["discard_pile_p2"].duplicate()
+	
+	# 恢复追踪变量
+	next_two_cards_discount = snap["next_two_cards_discount"]
+	consecutive_discount_used = snap["consecutive_discount_used"]
+	skill_played_this_turn = snap["skill_played_this_turn"]
+	energy_used_this_turn = snap["energy_used_this_turn"]
+	last_played_card_type = snap["last_played_card_type"]
+	last_played_card_id = snap["last_played_card_id"]
+	
+	# 恢复手牌（增量回滚：多了的删掉，少了的加回来）
+	_rollback_hand(hand1, snap["p1_hand_ids"])
+	_rollback_hand(hand2, snap["p2_hand_ids"])
+	
+	_update_ui()
+	_update_deck_ui()
+	_update_sect_ui()
+	print("[Lua事务] 已回滚到出牌前状态")
+
+
+func _rollback_hand(hand_node, target_ids: Array):
+	# 移除快照后新增的卡牌
+	var to_remove: Array = []
+	var current_ids: Array = []
+	for c in hand_node.cards:
+		current_ids.append(c.card_data.card_id)
+	
+	# 找出多余的卡（Lua 通过 gd_add_card_to_hand 加的）
+	for i in range(current_ids.size()):
+		if not target_ids.has(current_ids[i]):
+			to_remove.append(hand_node.cards[i])
+	for c in to_remove:
+		hand_node.remove_card(c)
+		CardPool.release(c)
+	
+	# 补回被 Lua 删掉的卡
+	for cid in target_ids:
+		var found = false
+		for c in hand_node.cards:
+			if c.card_data.card_id == cid:
+				found = true
+				break
+		if not found:
+			var path = "res://resources/cards/%s.tres" % cid
+			var data = load(path)
+			if data:
+				var card_scene = load("res://scenes/card.tscn")
+				var card = CardPool.acquire(card_scene)
+				card.setup(data)
+				hand_node.add_card(card)
 
 
 # ====================================================================
@@ -1559,6 +1680,7 @@ func network_reward_open(options: Array):
 
 # 客机收到：显示地图
 func network_show_map():
+	_hide_waiting_mask()
 	_show_map()
 
 
@@ -1660,6 +1782,10 @@ func _on_node_selected(node_type: int):
 			# 主机：直接执行 + 广播给客机
 			_do_select_node(node_type)
 			NetworkManager.rpc("sync_select_node", node_type)
+			# 战斗节点：场景重载后 _ready 会重新初始化，延迟推快照
+			if node_type == GameData.NodeType.BATTLE_NORMAL or node_type == GameData.NodeType.BATTLE_ELITE:
+				# 等场景重载完成后再推快照
+				await get_tree().create_timer(1.0).timeout
 			NetworkManager.push_snapshot()
 		else:
 			# 客机：请求主机执行
@@ -1677,7 +1803,41 @@ func network_select_node(node_type: int):
 func _do_select_node(node_type: int):
 	match node_type:
 		GameData.NodeType.BATTLE_NORMAL, GameData.NodeType.BATTLE_ELITE:
-			get_tree().reload_current_scene()
+			# 推进楼层
+			GameData.advance_floor()
+			# 重置战斗状态
+			game_over = false
+			end_turn_btn.disabled = false
+			player1.init()
+			player2.init(true)
+			hand1.clear()
+			hand2.clear()
+			discard_pile.clear()
+			discard_pile_p2.clear()
+			_start_battle()
+			draw_pile = GameData.player_deck.duplicate()
+			draw_pile.shuffle()
+			if GameData.is_dual_mode:
+				draw_pile_p2 = GameData.player2_deck.duplicate()
+				draw_pile_p2.shuffle()
+			# 重启回合管理器（客机不启动，等快照）
+			if turn_manager:
+				turn_manager.queue_free()
+			turn_manager = TurnManager.new()
+			turn_manager.name = "TurnManager"
+			add_child(turn_manager)
+			if not (NetworkManager.is_lan and not NetworkManager.is_host):
+				turn_manager.turn_started.connect(_on_turn_started)
+				turn_manager.turn_changed.connect(_on_turn_started)
+				turn_manager.start_battle(GameData.is_dual_mode)
+			_update_ui()
+			_update_deck_ui()
+			# 隐藏地图
+			node_map.visible = false
+			_hide_waiting_mask()
+			# 客机：显示等待遮罩，等主机推快照
+			if NetworkManager.is_lan and not NetworkManager.is_host:
+				_show_waiting_mask("同步战斗状态...")
 		
 		GameData.NodeType.SHOP:
 			_open_shop()

@@ -45,11 +45,17 @@ func _ready():
 	$BottomBar/BackBtn.pressed.connect(_on_back)
 	$BottomBar/ConfirmBtn.pressed.connect(_on_confirm)
 	
-	# LAN 客机：显示等待遮罩，禁止操作
+	# LAN 客机：显示等待遮罩，禁止操作，监听 game_start_ready
 	if NetworkManager.is_lan and not NetworkManager.is_host:
 		$BottomBar/BackBtn.disabled = true
 		$BottomBar/ConfirmBtn.disabled = true
+		
+		# 监听主机完成选人后的开始信号
+		if not NetworkManager.game_start_ready.is_connected(_on_lan_game_start):
+			NetworkManager.game_start_ready.connect(_on_lan_game_start)
+		
 		var mask = ColorRect.new()
+		mask.name = "WaitMask"
 		mask.color = Color(0, 0, 0, 0.7)
 		mask.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		mask.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -162,7 +168,7 @@ func _on_confirm():
 		GameData.selected_character_2 = hid
 		_pick_count = 2
 		if school != "":
-			_start_dual_run(school)
+			_finish_dual_run(school)
 		else:
 			_show_school_picker()
 	else:
@@ -237,7 +243,7 @@ func _on_pick_school(school: String, picker: Panel):
 		else:
 			start_run(school)
 	elif _pick_count == 2:
-		_start_dual_run(school)
+		_finish_dual_run(school)
 	else:
 		start_run(school)
 
@@ -245,29 +251,49 @@ func _on_pick_school(school: String, picker: Panel):
 func _after_p1_pick():
 	"""P1选完角色+门派，界面切到P2选择"""
 	if GameData.is_dual_mode:
-		$InfoPanel/CharName.text = "玩家2选择角色"
-		$InfoPanel/PassiveDesc.text = "请选择第二位角色"
-		$InfoPanel/StoryDesc.text = ""
-		var saved = GameData.selected_character
-		current_index = 0
-		show_hero(0)
-		GameData.selected_character = saved
+		if NetworkManager.is_lan and NetworkManager.is_host:
+			# LAN 模式：通知客机解锁，让 P2 自己选角色
+			NetworkManager.rpc("sync_p2_pick")
+			# 主机端显示等待
+			$InfoPanel/CharName.text = "等待玩家2选择角色..."
+			$InfoPanel/PassiveDesc.text = ""
+			$InfoPanel/StoryDesc.text = ""
+			$BottomBar/ConfirmBtn.disabled = true
+		else:
+			# 同屏模式：直接切到 P2 选择
+			$InfoPanel/CharName.text = "玩家2选择角色"
+			$InfoPanel/PassiveDesc.text = "请选择第二位角色"
+			$InfoPanel/StoryDesc.text = ""
+			var saved = GameData.selected_character
+			current_index = 0
+			show_hero(0)
+			GameData.selected_character = saved
 	else:
 		start_run(_p1_school)
 
 
-func _start_dual_run(school_p2: String):
+func _finish_dual_run(school_p2: String):
 	"""双人：两人都选完，开战"""
-	# 保存角色名（new_dual_run 会清空它们）
+	# LAN 客机：通知主机 P2 选完了
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		NetworkManager.rpc_id(1, "request_p2_pick", GameData.selected_character_2, school_p2)
+		# 客机等主机的 sync_start_game
+		$InfoPanel/CharName.text = "等待主机开始..."
+		$BottomBar/ConfirmBtn.disabled = true
+		return
+	
+	# 主机/同屏：执行完整的开始流程
+	_start_dual_run_impl(school_p2)
+
+
+func _start_dual_run_impl(school_p2: String):
 	var saved_c1 = GameData.selected_character
 	var saved_c2 = GameData.selected_character_2
 	
 	GameData.new_dual_run()
-	# 恢复角色名
 	GameData.selected_character = saved_c1
 	GameData.selected_character_2 = saved_c2
 	
-	# 玩家1的门派牌
 	match _p1_school:
 		"shaolin":
 			GameData.add_card("sl_fist"); GameData.add_card("sl_iron")
@@ -276,7 +302,6 @@ func _start_dual_run(school_p2: String):
 		"xiaoyao":
 			GameData.add_card("xy_beiming"); GameData.add_card("xy_lingbo")
 	
-	# 玩家2的门派牌
 	match school_p2:
 		"shaolin":
 			GameData.add_card_to_player2("sl_fist"); GameData.add_card_to_player2("sl_iron")
@@ -285,13 +310,34 @@ func _start_dual_run(school_p2: String):
 		"xiaoyao":
 			GameData.add_card_to_player2("xy_beiming"); GameData.add_card_to_player2("xy_lingbo")
 	
-	# 局域网：通知客机进游戏（学校牌已加入后再同步牌组）
 	NetworkManager.host_in_select = false
 	if NetworkManager.is_lan and NetworkManager.is_host:
 		NetworkManager.rpc("sync_start_game", saved_c1, saved_c2, GameData.player_deck.duplicate(), GameData.player2_deck.duplicate())
 	
-	# 启动双人战斗场景
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
+
+
+# LAN 客机收到：P1 选完了，轮到 P2 选
+func network_p2_pick():
+	_pick_count = 1
+	# 解锁按钮
+	$BottomBar/BackBtn.disabled = false
+	$BottomBar/ConfirmBtn.disabled = false
+	$InfoPanel/CharName.text = "玩家2选择角色"
+	$InfoPanel/PassiveDesc.text = "请选择你的角色"
+	$InfoPanel/StoryDesc.text = ""
+	# 移除遮罩
+	var mask = get_node_or_null("WaitMask")
+	if mask:
+		mask.queue_free()
+	current_index = 0
+	show_hero(0)
+
+
+# LAN 主机收到：P2 选完了，开始游戏
+func network_p2_pick_done(p2_char: String, p2_school: String):
+	GameData.selected_character_2 = p2_char
+	_start_dual_run_impl(p2_school)
 
 
 func start_run(school: String):
@@ -312,3 +358,11 @@ func start_run(school: String):
 
 func _on_back():
 	get_tree().change_scene_to_file("res://scenes/start_screen.tscn")
+
+
+# LAN 客机：主机选完角色后进入游戏
+func _on_lan_game_start():
+	GameData.is_dual_mode = true
+	if NetworkManager.p2_reconnecting:
+		GameData.loading_save = true
+	get_tree().change_scene_to_file("res://scenes/main.tscn")

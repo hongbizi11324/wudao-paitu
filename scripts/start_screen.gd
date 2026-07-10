@@ -91,7 +91,8 @@ func _on_network_ready():
 
 func _on_game_start():
 	GameData.is_dual_mode = true
-	if GameData.has_save():
+	# 只有重连场景才设 loading_save
+	if NetworkManager.p2_reconnecting:
 		GameData.loading_save = true
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
@@ -140,7 +141,4 @@ func _on_quit():
 # RPC回调：主机通知客机进入选人界面
 func network_enter_select_school():
 	GameData.is_dual_mode = true
-	# 客机也要监听 game_start_ready，选人完成后主机会发 sync_start_game
-	if not NetworkManager.game_start_ready.is_connected(_on_game_start):
-		NetworkManager.game_start_ready.connect(_on_game_start)
 	get_tree().change_scene_to_file("res://scenes/select_school.tscn")

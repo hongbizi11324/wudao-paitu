@@ -109,14 +109,14 @@ func _on_peer_connected(id: int):
 	print("[网络] 玩家已连接 (ID=%d)" % id)
 	rpc_id(id, "_receive_seed", shared_seed)
 	
-	# 如果已有存档（重连场景），推送完整状态恢复
-	if is_host and GameData.has_save():
+	if is_host and host_in_select:
+		# 主机在选人界面：新游戏，通知客机也进选人
+		rpc_id(id, "sync_enter_select_school")
+	elif is_host and not host_in_select and GameData.has_save():
+		# 主机不在选人但有存档：重连场景
 		p2_reconnecting = true
 		print("[网络] 检测到存档，准备推送重连快照...")
 		player_reconnected.emit()
-	elif is_host and host_in_select:
-		# 主机在选人界面：通知客机也进选人
-		rpc_id(id, "sync_enter_select_school")
 
 
 func _on_peer_disconnected(id: int):
@@ -147,9 +147,21 @@ func _receive_seed(seed_val: int):
 # ── 主机通知客机进入选人界面 ──
 @rpc("authority", "reliable")
 func sync_enter_select_school():
-	var main = get_tree().current_scene
-	if main and main.has_method("network_enter_select_school"):
-		main.network_enter_select_school()
+	_find_and_call("network_enter_select_school")
+
+
+# 主机 → 客机：P1 选完了，轮到 P2 选角色
+@rpc("authority", "reliable")
+func sync_p2_pick():
+	_find_and_call("network_p2_pick")
+
+
+# 客机 → 主机：P2 选完了
+@rpc("any_peer", "reliable")
+func request_p2_pick(p2_char: String, p2_school: String):
+	if not is_host:
+		return
+	_find_and_call("network_p2_pick_done", [p2_char, p2_school])
 
 
 # ── 主机推送重连数据 ──
@@ -254,6 +266,24 @@ func _safe_call(method: String, args: Array):
 	var main = get_tree().current_scene
 	if main and main.has_method(method):
 		main.callv(method, args)
+	else:
+		_find_and_call(method, args)
+
+
+# 搜索场景树找有指定方法的节点（CanvasLayer 不是 current_scene）
+func _find_and_call(method: String, args: Array = []):
+	var root = get_tree().root
+	_search_and_call(root, method, args)
+
+
+func _search_and_call(node: Node, method: String, args: Array) -> bool:
+	if node.has_method(method):
+		node.callv(method, args)
+		return true
+	for child in node.get_children():
+		if _search_and_call(child, method, args):
+			return true
+	return false
 
 
 # 地图节点同步
