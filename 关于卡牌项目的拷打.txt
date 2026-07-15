@@ -1,0 +1,506 @@
+q:这三层架构分别是哪些层，有什么用
+a:宿主层是gds  （mian.gd/card。gd）
+宿主层是管：什么时候调和结果怎么用 负责生命周期和结果应用
+{
+    mian.gd _execute_card()里
+    if LuaRuntime and LuaRuntime.enabled:
+    var lua_result=_try_execute_card_via_lua(card,data,actual_const)
+    if lua_result:
+    return
+    match data.card_id:
+    "strike": dmg=6+GameData.get_damage+bonus()
+}宿主层干了个什么事情呢：1玩家点牌，扣除费用，追踪状态。2调用luaRuntime._execute_card()把ctx交给桥接层。3，从桥接层拿回封装的Dictionary->这个数据应用于游戏中的抽牌/回血/伤害。4如果lua出错了，然后将分支回退回已有的GDSrcipt分支重新执行
+
+桥接层是lua_runtime.gd管理lua的生命周期和双向调用
+桥接层干的第一件事：出牌调用
+{
+    func execute_card(card_id,ctx)
+    #先将ctx放在全局表里给表里的_call_ctx赋值
+    _lua.global["_call_ctx"]=ctx
+    #然后将func这个函数注册创建 这里是将两个字段拼接重新编译成lua函数
+    var func=_lua.load_string("return CardEffect['strike'] ( _G._call_ctx)")
+    #然后调用这个函数返回结果
+    var result=func.invoke()
+    return result
+}
+桥接层干第二个件事：
+{
+      func _setup_godot_bindings()
+    #把GScript的lambda注册到Lua全局表中
+      _lua.global["gd_player_heal"]=func(amount): host.player.heal(amount)
+     
+     _lua.global["gd_add_card_to_hand"]=func(card_id):  //注册一个gd_add_card_to_hand的添加手牌的函数到lua环境中 然后他的值是func这个lamabda这个匿名函数中的card_id这个值
+     var data=load("res://resources/cards/%s.tres"%card_id) 根据上面传入的id 动态加载对应的卡牌资源%card_id是占位符会替换成传入的值形成完整路径
+     var new_card=CardPool.acquire(cscene) 从对象池（CardPool）获取一个实际场景中的对象，将新卡挂在到场景对象中，使他可用
+     new_card.setup(data)  setup将数据赋值给这个卡牌对象，让他变成一张完整可用的卡牌
+     host.hand.add_card(new_card) 将卡牌添加到玩家手中
+}
+
+脚本层cards.lua做纯逻辑计算
+{
+    CardEffect.strike= function(ctx)
+    return Dictionary{
+        damage=ctx.damage+damage_bonus, -计算伤害
+        block=0,heal=0,draw=0,energy_gain=0,
+        is_consumed = false,
+    }
+end
+}
+接受当前游戏快照ctx 2计算伤害 3返回Dictionary 4如果需要回调操作游戏状态 必须要调动gd_*走桥接层
+
+映射关系如何
+GDScript：                        Lua:                       c++转换：
+        int/float                     number                lua_pushinteger(L,val)
+        string                         string               lua_pushstring(L,val.utf8().ptr())
+        Dictionary                      table               Dictionary{}构造语法，lua-gdextension遍历Key-Value对 压栈
+        Callable                        function            lua_pushfunction+upvalue包装
+存在Callable被lua调用时GC的风险吗？
+存在：Callable捕获了Host变量后。如果host被释放了但是lua全局表还持有Callable引用——>并且访问了host，会导致崩溃，在当前autoload下还不会有这个问题（因为host挂载的NODE在auto下永远不会被queue_freed（）执行）
+解决方案：在需要更新场景后 将if host 改为if is_instance_valid(host) and is_instence_valid(host.player)
+
+基于GDExtension嵌入lua5.4虚拟机
+Q:GDExtension是什么？
+A:Godot4的原生插件系统，用c++编译成.dll，通过.gdextension配置文件注册到引擎。引擎启动时加载DLL,注册新的Godot类（如luaState）
+{
+    luaL_newState() ->分配一个lua_state结构体 初始化栈 GC 全局表
+    luaL_openlibs() ->打开并注册标准库 base/table/string/math/io 等标准库到全局表
+    luaL_dafile(L,path) ->=luaL_loadfile(L,path)+lua_pcall(L,0,LUA_MULTRET,0)  loadfile():读文件->词法分析->语法分析->语义分析->生成字节码->压栈  lua_pcall():在保护模式下执行栈顶函数
+}
+
+Q:lua虚拟机是什么
+A:虚拟机就是一个c语言写的程序
+lua的源码就是一堆.c文件，他编译出来就是库（.dll/.so）文件.这个库的核心就是mian()这个循环
+叫做“解释器”-它读lua代码，一行一行的解释执行
+{
+    你写的card.lua文件
+    ——>luaL_loadstring()读取文件内容，词法分析，语法分析，编译成字节码
+    ——>lua_pacll()执行字节码，这就是“虚拟机”在运行
+}
+这个Lua虚拟机不是VM那种硬核虚拟机，而是软件层面的执行引擎-像JAVA的JYM,Python的CPython解释器，JavaScripi的V8引擎，都是同一个概念：一个程序负责读另一个语言的代码，然后执行
+
+Q:Lua虚拟机具体干了什么？
+A:在卡牌项目里，lua虚拟机干了三件事情
+1.加载脚本
+{
+    _lua=Luastate.new() //创建了一个lua虚拟机实例
+    _lua.open_libraies() //加载了一些标准库 如io string
+    _lua.do_file("res://lua/card.lua") //加载脚本，读文件，编译，执行
+}
+2.执行脚本
+{
+    _lua.globals["_call_ctx"]=ctx //把游戏状态塞进去，或者说把上下文代码给lua虚拟机 流程是宿主端将ctx传入lua虚拟机，然后让虚拟机再全局table表中把这个值赋值给一个叫_call_ctx的键
+    var f= _lua.load_string("return CardEffect['strike']("_G._call_ctx)") //将这个CardEffect["strike"]这个字符串编程Lua可以执行的字节码指令，然后返回一个匿名函数包，然后f持有这个函数包的在lua虚拟机里的引用
+    var result=f.invoke()    //lua虚拟机执行这个函数 然后宿主端告诉lua虚拟机我要调用这个闭包函数了 cpu执行流跳转到lua的main()循环中在全局表里找CardEffect["strike"]再将_call_ctx传进去，开始计算。算出结果后把结果放栈顶，然后宿主端从栈顶取出赋值给result
+}
+虚拟机拿到“return CardEffect["strike"]("_G._call_ctx")”后，编译成字节码然后执行，返回一个Dictionary
+3.热重载
+{
+    _lua.reload_file("res://lua/card.lua") //再执行一遍同一个文件
+}
+那他就会将以上过程再重新做一遍，重新读文件，重新编译，重新执行，CardEffect["strike"]这个函数被重新定义了，那么lua虚拟机就会将这个函数的引用从全局表里删掉，然后重新定义这个函数，然后重新将这个函数的引用塞进全局表里，这样下次执行这个函数的时候，lua虚拟机就会从全局表里找到这个函数的引用，然后执行这个函数。
+这就是热更新，本质是lua重新跑一遍脚本，而不用重新执行整个游戏
+
+Q:为什么宿主层GDScript不能进行热更新，必须要Lua虚拟机
+A:因为GOdot4里面的这个虚拟机GDScript VM 在更改main.gd文件后，不会再次编译，重新加载。
+
+关于30+回调函数双向调用的探究
+Q:有哪些回调函数？分为几类？
+A:四类：
+1.数值查询：gd_get_damage_bonus
+2,状态操作：gd_player_heal  gd_enemy_take_damage
+3,手牌操作：gd_add_card_to_hand gd_discard_card_by_index
+4,牌堆操作：gd_draw_cards
+关于回调函数的实现举例 gd_add_card_to_hand
+{
+    #lua_runtime.gd里注册给lua的回调
+    _lua.globals["gd_add_card_to_hand"]=func(card_id):
+    if not host:return; 现在可以改为if is_instance_valid(host) and is_instance_valid(host.player)                             //在全局表中将从GDScript中获取的card_id赋值给_lua.globals["gd_add_card_to_hand"]这个键
+    
+    #加载卡牌数据
+    var path="res://resources/cards/%s.tres" %card_id 
+    var data=load(path)  #这个load()就是Godot里的Resource.load()转化过来的
+    
+    #初始化卡牌并加入手牌
+    new_card.setup(data)
+    if not host.hand.add_card(new_card):
+    host.CardPool.release(new_card)
+    var dc=host.discard_pile_p2 if host._active_player=2 else host.discard_pile_p1
+    dc.append(card_id)
+}
+Q:如果回调函数报错会怎么样？怎么解决？
+A:GDScript lambda里报错会打印错误信息但是不会崩溃godot. lua也不会受到错误信息，lua会认为执行成功了，这时候双方返回的结果不一致，需要用事务快照解决
+解决流程演示：
+{
+    在调用Lua前拍照存下当前游戏的所有状态
+    func _try_execute_card_via_lua(card,data,actual_const) -> bool:
+    var snap=_snapshot_battle_state()
+
+    #调用Lua执行卡牌效果
+    var result=LuaRuntime.execute_card(data.card_id,ctx)
+
+    #如果Lua说报错，或者没返回Dictionary
+    if result.is_empty():
+    #回滚到拍照时候的样子，然后执行GDScript的代码
+    _rollback_battle_state(snap)
+    return false
+}
+那手牌怎么回滚？
+{
+    手牌增量回滚
+    func _rollback_hand(hand_node,target_ids):
+    1,删掉现在又原来没有的牌
+    2，加上原来有现在没有的牌
+}
+
+
+Q:为什么要在lua里面调用GDScript呢？ lua不能直接改player.hp吗
+A:不能，因为角色的数值是在godot里面的，lua必须通过桥接层才能获取到godot对象的属性
+Q:那开销呢？ A:在卡牌游戏的接受范围之内
+
+Q:为什么不把角色属性也放到lua里面呢？
+A: 如果把这些放到lua确实看起来更纯逻辑，都省去了互相调用函数这一步，但是
+1，Godot的ui系统是强依赖信号的
+{
+    #main.中 
+    player1.hp_changed.connect(_on_hp_changed) #血量变化->血条更新触发这个函数
+
+    func _on_hp_changed(hp):
+    #更新血条
+    hp_label.text="HP %d/%d" %[cur,max_val]
+}
+那如果HP在Lua里面，当Lua改了player.hp=50时，无法调用emit_signal("hp_changed",50) 因为这是godot的信号，那只能在写个gd_emit_hp_changed()函数来触发这个信号,把属性改回godot里面，又绕回去了
+2.存档困难，放lua每次存档还要去lua里调数据
+3，lua本身是个无状态的函数逻辑，不持久化，存取实时数据也麻烦，而Godot是有状态的节点树。
+当HP数据放在Lua里 而属于他的 _ready() _process() 信号链接 碰撞体这一类东西和他分开。本身就是一个很不合理的东西，一直会发生不停在两个虚拟机同步信息的事情发生。
+
+
+
+"轮询文件修改时间出发do_file重载"怎么做到的
+Q:怎么检测文件变化？
+A:_process()里每秒调用FlieAccess.get_modified_time(path),和上次记录的时间戳比较，如果不同就触发do_file()重载.
+PS:因为这个开销非常小，这里只有3个文件需要轮询，所以不影响性能。在文件变得非常多之后更改方案为用操作系统的文件系统监听API 由操作系统来通知哪个文件变了。
+
+Q:为什么不用后台线程？
+A:Godot API非线程安全。do_file()修改lua全局表，全局表通过Callable持有Godot对象引用。主线程同时在用这些对象->数据竞争->崩溃
+简单来说就是Godot API没有做多线程设计，在Godot和lua同时调用这些数据时会造成数据竞争
+
+Q:get_modified_time()底层做了什么
+A:OS级 stat()系统调用了-读文件系统的inode元数据（修改时间。大小。权限），不读文件内容。微秒级，不触发磁盘io(文件系统缓存命中)
+
+Q:do_file()重载时旧函数怎么办？
+A:card.lua第一行CardEffect={}直接覆盖掉全局表。旧函数失去引用后->lua增量GC标记->下次GC回收。下次GC才回收是不影响正在执行的invoke()的，或者这样说，invoke()正在引用他，所以这个对象在这一轮不会被GC掉，下一轮不被引用才被GC掉
+
+PS:GC原理：通过根节点遍历所有可达对象，给这些对象打上标记，这些对象还在用，而遍历不到的对象就是生命周期结束的垃圾，将被GC掉。
+
+"Lua出错降级回退GDScript"
+Q:怎么捕获lua错误
+A:1.load_string()返回Lua编译错误
+  2.invoke()返回Lua运行错误
+  3.不需要pcall()-因为lua_Exetension里面的invoke()内部有lua_pcall()
+
+Q:降级的边界是什么？
+A:每张卡单独判断降级
+execute_card()返回空字典->_try_execute_card_via_lua()返回false-> _execute_card继续走GDScript match分支。
+PS:pacll只能捕获错误不让程序崩溃，不能回滚已经出现的副作用。
+
+Q:Lua5.4的增量GC是怎么工作的？
+A:GC分三步：1.标记 2.清理 3.清扫。
+增量式把这三步，分为很多小步，分散到每一次内存分配的时候执行一步，避免了STW(lua因为其轻量级，不能接受长时间暂停进行垃圾回收处理)卡帧。每次do_file()后新增的对象是"白色"
+GC逐步标记可达对象为"黑色”，不可达对象被清扫回收。
+PS:这里补充一点：这些GC对象都是怎么被确认的呢？ 都是用了同一个算法，每隔一段时间从根节点进行一个全局的遍历扫描，可达的对象标记为正在被引用，不可达对象生命周期结束。
+
+“主机权威+瘦客户端”
+Q:什么是主机权威，瘦客户端？还有其他的模式吗？
+A:主机权威指的是：主机既是客户端，也是服务器，跑全部的游戏逻辑。客机只发输入，收结果，渲染。这些工作，所有状态变更由主机决定
+还有客户端权威：逻辑和数据都储存在客户端上，有点服务器开发简单，但是难以防作弊。
+对等网络模式：每个客户端都是服务器 优点：扩展性强，支持用户多，容错好，宽带成本低 缺点：安全性差，难以实现架构
+混合权威模式（用的最多）：设计核心玩法，经济系统，玩家数据方面采用主机权威，而对于音效，ui布局，非关键动画，则采用客户端权威提升相应速度。
+
+Q:为什么用状态同步，不用帧同步？二者有什么区别？
+A：帧同步：要求所有客户端模拟完全确定-浮点数运算，随机种子运算，容器遍历顺序必须一致。
+卡牌有大量随机效果和条件分支，保证确定性的成本太大，开发和调试难度也高。
+    状态同步：只用同步游戏状态，在服务器上进行核心逻辑计算，将计算后的结果广播给客户端。也可以起到防作弊的效果。
+对于绝大多数网络游戏来说，尤其是在安全性，开发效率和稳定性有要求的游戏，状态同步的优势是压倒性的。
+
+Q:但是既然选择了状态同步，那么就出现了问题“服务器——>客户端展示”这一过程存在延迟，尤其是对于fps游戏非常敏感，那么怎么解决这个问题呢？
+A:核心思路是预测和补偿：
+1.客户端预测
+{
+    1，在纯粹的状态同步下，客户端需要从主机接受到运算的结果，玩家才能看到移动，这会产生极大的延迟和割裂感
+    解决方案：在玩家按下指令后，不等待服务器确认，玩家在本地预测并执行这个操作，让角色提前动起来。在服务器的包到达时，将本地预测结果与服务器的真实结果进行对比。
+    纠错与平滑： 如果两者结果相同，那么结果很好，降低了延迟感受且不需要修改。如果结果不同，那么要将角色平滑的回到服务器所算的正确的地方，如果没处理好，就会造成卡顿现象。
+    那么有什么方法能够优化一下这种卡顿现象呢？
+    {
+        插值：客户端在收到新的包，在二者位置间计算一个中间值插入，让对象在一段时间内匀速移动过去，让动画顺滑。
+        外推：客户端在等待新数据包的空窗期，根据对象的状态预测移动轨迹，让动画显得更平滑，不至于定在原地。
+    }
+}
+2.服务器回滚：
+{
+    在射击游戏中，因为不同玩家的延迟不同，下达的指令，到达的先后顺序会出现不同。在本地时间T=10s时玩家A设计了玩家B但是当这个指令到服务器已经T=50ms了，这个时候在这40ms的时间内
+    玩家B可能已经移动到了新的位置，那么肯定不能用玩家B现在的位置进行计算，从而判断设计失败。
+    解决方案：服务器为每位玩家维护一个历史状态记录，当他收到一个延迟的射击请求时，根据发送者的ping值，来计算出玩家这个指令是在多久以前发送的，然后根据那时的状态进行计算。
+}
+
+Q:客户端权威的短板有哪些？
+A:1.在无主机迁移的情况下，主机掉线游戏无法恢复
+  2.客机出牌有延迟，解决办法如上
+  3.主机可以作弊，但看游戏情况，无所谓
+  怎么解决呢？
+  {
+    保存存档，主机掉线后，可以用这个存档继续这局游戏
+    客机靠一些ui特效，或者预测降低延迟体感。
+  }
+
+“状态同步快照”
+Q:快照包含什么？
+A:回合状态 双方HP/能量条/格挡值 手牌ID列表 牌库/弃牌堆数量 敌人状态 当前楼层 game_over标志
+
+Q:什么时候推快照？
+A:事件驱动-每次关键操作后就推一次快照：出牌，结束回合，选节点，敌人回合结束。
+
+Q:由事件驱动，在每次事件发生是推送快照，非常有可能抢占资源造成卡顿，你是怎么解决的呢？
+A:首先明确推送快照的开销：1.序列化：将游戏对象的状态转化为网络传输的字节流，这个过程需要cpu计算 2.网络传输：将数据包通过网络传输发出去。
+{
+    首先我们这个游戏数据量比较小，序列化的开销可以忽略不记。
+    回合制游戏出牌的频率也比较低，完全可以承受。
+
+    那么普通情况应该怎么优化呢，解决方案如下：
+    1.限制推送频率：即使20ms 或50ms 在这段时间内，即使玩家进行了多次操作也只推送一次快照。
+    2.增量快照：我们不必每次都发送完整的快照，而是仅发送发生了改变的部分（PS:那么怎么标记脏数据呢？1.加一个bool值判断就行了，我的项目里面没有加，只对比了变化数值然后推送）
+    3.异步发送：把序列化好的二进制数据放进一个发送队列里面，让后台线程负责socket,send()，主线程不等待。
+    4.在快照延迟到达时，使用预测和插值掩盖卡顿。
+}
+Q:那么快照同步同样会给内存造成极大的负担，如何解决呢？
+A:频繁的状态打包/拆包会产生大量临时对象，触发GC,导致游戏卡顿
+先从我卡牌游戏的视角出发：
+{   #序列化
+    var snap={
+        "p1_hp":main_node.player1.hp,             //int 装箱成 Variant
+        "p1_hand_ids";[1,2,3,4,5]                 //新建Array对象 -> GC
+        "enemy_portrait":ep.texture.resource_path  //新建String对象 -> GC
+    for c in main_node.hand1.cards:
+        snap["p1_hand_ids"].append(c.card_data.card_id)  //循环里可能触发数组扩容-> GC
+    }
+
+
+    #反序列化
+    Godot RPC底层做了bytes_to_var,生成了一个新的Dictionary->GC 
+    var p1_ended=snap.get("p1_ended",false)   //可能产生临时variant -> GC
+}
+这些都是产生GC的东西
+1，当前来说每秒只产生1-2个Dictionary 还好GC不频繁
+2. Godot的Variant有优化：基础类型（int/float/bool）在Variant里是值类型赋值，不会产生堆分配，主要垃圾还是在Dictionary String Array里。
+3。如果是ARPG（每帧同步60次）那就有问题了，每秒产生几KB的垃圾，那么接下来寻求解决办法
+{
+    1.首先肯定是使用对象池，这是解决内存的一个大手段
+    实现如下{
+        #直接预分配一个复用的快照对象
+        var _snap_pool:Dictionary={}
+
+        func build_snapshot(main_node)->Dictionary:
+        #不在用new,直接改已经有的Dictionary
+        _snap_pool["p1_hp"]=main_node.player1.hp 
+        _snap_pool["p1_block"]=main_node.player1.block
+
+        #手牌列表也复用
+        var hand_ids=_snap_pool.get["p1_hand_ids"]
+        hand_ids.clear() //清空但不释放内存
+        for c in main_node.hand1.cards:
+            hand_ids.append(c.card_data.card_id)
+        return _snap_pool
+
+        PS:在Godot中 RPC在底层传输会进行深拷贝（var_to_bytes）会把传进去的自带你序列化为二进制流，所以复用同一个字典对象是安全的
+    }
+
+    2，只同步变化的值，减小序列化的量
+    {
+        #只打包变化的字段
+        var _last_snap:Dictionary={}
+        var _dirty_flags:Dictionary={}
+
+        func build_snapshot(main_node)->Dictionary:
+        var delta={}
+        if main_node.player1.hp!= _last_snap.get("p1_hp",-1):
+            delta["p1_hp"]=main_node.player1.hp
+            _last_snap["p1_hp"]=main_node.player1.hp
+
+        if mian_node.player1.energy!= _last_snap.get("p1_energy",-1):
+            delta["p1_energy"]=main_node.player1.energy
+            _last_snap["p1_energy"]=main_node.player1.energy
+
+        return delta    
+    }
+    优势：如果没掉血甚至都不会进行序列化操作
+
+    3.使用原生类型数组（PackedArray）或者buffer等 一块连续的内存进行操作
+    {
+        Dictionary存储字符串非常浪费内存而且解析慢，把所有数值拍平成一个一维数组通过固定索引存取
+        #传统快照（每次产生String比较）
+        snap["p1_hp"]=50
+        snap["p1_energy"]=3
+
+        #PackedIntArray优化
+        var snap=PackedIntArray()
+        snap.append(player1.hp)         //Index 0
+        snap.append(player1.max_hp)     //Index 1
+        snap.append(player1.energy)     //Index 2
+        #传输只需要传这段连续内存的指针，底层var_to_bytes 完成速度很快
+
+        PS:数组一般在内存里是连续储存的 序列化时直接进行内存拷贝，不需要像Dictionary遍历哈希表 或者进行字符拼接。
+    }
+
+    4.直接在C++层面操作，在底层内存里面申请一段byte[],用指针直接往里面写二进制数据，绕过VM虚拟机的对象系统
+}
+
+
+Q：快照时怎么传输的？
+A:@rpc("authority","reliable")通过ENet发送。ENet reliable=UDP + 序列号 + ACK + 重传。快照时一个Dictionary,序列化后约200~300字节。
+Q:快照太大怎么办？
+A:1.只推送变化字段
+2.压缩
+3.分包传输，序列号重组。
+
+
+“增量同步手牌避免全景重建闪烁”
+Q:造成闪烁的原因是什么？
+A:clear()移除所有卡牌实例后->场景树变化->扇形重排动画触发->add_card()逐个添加->再次重排。就会造成视觉上手牌消失再出现。
+Q:你这个增量同步算法是什么？
+A:双重遍历：1遍历当前手牌找要删除的（当前有快照没有的）;2遍历快照手牌找要加的（快照有但是手牌没有的）。只增删有变化的卡牌实例
+Q:手牌顺序变化了怎么办？你是怎么处理的
+A:_diff_hand只做增删不做重排，在当前流程中出牌移除，新增牌直接Push到末尾，顺序一致。
+后续也可以用LCS(最长公共子序列)算法来找手牌ID顺序差异。
+Q:手牌频繁的增删也会造成内存压力，你是怎么解决的？
+A:这个我用了cardPool建了一个对象池，以下是具体实现
+{
+    #card_pool.gd
+    var _pool:Dictonary={}  #按prefab路径分池
+    var _active:Dictionary={}  #正在使用的实例
+
+    func acquire(scene)->Node:
+    var path = Scene.resource_path
+    if not _pool.has(path):
+      _pool[path]=[]
+
+    var pool:Array=_pool[path]
+    #先找池子里有没有空闲的
+    for i in range(pool.size()):
+      var  obj=pool[i]
+      if not is_instance_valid(obj):
+        pool.remove_at(i)
+        continue
+      var id = obj.get_instance_id()
+      if not_active.has(id):
+       _active[id] = true
+        obj.visible=true
+        _reset_node(obj)  #重置状态
+        return obj        
+
+    #池里没有的时候 new一个对象
+    var new_obj = scene.instantiate()
+    pool.append(new_obj)
+    _active[new_obj.get_instance_id()]= true
+    return new_obj
+
+    func release(node):
+    if not is_instance_valid(node):
+     return
+     var id = node.get_instance_id()
+     if not _active.erase(id):
+     #双重保护
+     if node.get_parent():
+       node.get_parent().remove_child(node)
+       node.queue_free()
+       return
+
+    #不删除 从场景树移除，然后隐藏放回池子里
+    if node.get_parent():
+    node.get_parent().remove_child(node)
+    node.visible=false
+    _reset_node(node)
+}
+
+
+“SharedTurn"
+Q:什么是SharedTurn？
+A:就是双方共享一个Player1状态，不分P1/P2回合，P1/P2各自独立出牌，立即结算，互补阻塞。等双方都点击结束后，进入敌方回合。
+Q:你说的降低延迟是什么意思？
+A:SharedTurn可以有效降低传统每人一个回合，玩家需要等待其他玩家回合结束才能到自己回合的一个体感体验问题。增强更多的联动性
+Q:状态机是怎么实现的
+A:p1_ended和p2_ended双标志位。P1/P2结束后 p1_ended=true; p2_ended=true; end_player_turn()会检查两个标志位，如果两个都为true，则进入敌方回合。
+Q:p1/p2的出牌阶段，结算阶段，是否会并发冲突？
+A:不会，所有操作都会路由到主机执行，敌人的take_damage是同步函数，不存在并发。
+
+Q:在热更新的时候，如果玩家处于出牌阶段，结算阶段，中途重载脚本，怎么规避并发冲突呢？
+A:1.我的这个卡牌游戏目前并不存在这个并发冲突，因为GDScript和Lua都在一个主线程里面跑，invoke是同步阻塞的。
+{
+    #mian.gd _execute_card里
+    var result= LuaRuntime.execute_card(data.card_id,ctx)  //这里是同步阻塞的
+    # lua执行完才会走到
+    if result.is_empty():
+    return false
+}
+invoke()底层调用的是lua_pcall()-这是一个c函数，不反悔就不往下走
+所以每次热重载只会在当前帧所有事情执行完，到下一帧的时候才会执行_process()
+
+
+Q：如果后续将扩展到200+牌，当前的lua脚本架构可能面临哪些瓶颈？
+A:1.性能方面：load_string()的重复编译开销
+{
+    当前代码里
+    #lua_runtime.gd execute_card()
+    var lua_func=_lua.load_string("return CardEffects['"+card_id+"'](_G._call_ctx)")
+    var result=lua_func.invoke()
+
+    他会在每次出牌都load_string()-词法分析->语法分析->生成字节码。这个过程一旦出牌数过多，或者大量手牌刷新，这个编译的开销就很多
+    那么解决方案就是预编译：
+    var _func_cache:Dictionary={}
+
+    func _get_card_func(card_id: String) -> LuaFunction:
+    if not _func_cache.has(card_id):
+        var f = _lua.load_string("return CardEffects['" + card_id + "'](_G._call_ctx)")
+        if not (f is LuaError):
+            _func_cache[card_id] = f
+    return _func_cache.get(card_id)
+
+# 热重载时清缓存
+    func reload():
+        _func_cache.clear()  # ← 旧编译结果全失效
+        _lua.do_file(CARDS_LUA_PATH)
+}
+2。工程瓶颈：lua卡牌全写到一个文件里面，维护起来就不现实
+两个人想看git提交也会出现冲突和错误
+所以需要分类拆开写
+{
+    --lua/cards/basic.Lua
+    local M={}
+    M.strike=function(ctx) ... end
+    M.heal=function(ctx) ... end
+    return M
+
+    --lua/cards/shalin.Lua
+    local M={}
+    M.shalin_strike=function(ctx) ... end
+    return M
+
+    --lua/cards.Lua
+    CardEffects={}
+    local basic=require("cards.basic")
+    local shalin=require("cards.shalin")
+
+    --合并到全局表
+    for k,v in pairs(basic) do
+        CardEffects[k]=v
+    end
+    for k,v in pairs(shalin) do
+        CardEffects[k]=v
+    end
+}
+
+
+“三态状态机复用于单人/双人。联机三个模式”
+A:三态指{enum Turn{PLAYER1,PLAYER2,ENEMY}}单人：PLAYER1→ENEMY→PLAYER1。双人：PLAYER1(P1+P2共享)→ENEMY→PLAYER1。
+
+Q:如何复用？
+A:_apply_turn函数只通过GameData.is_dual_mode和NetworkManager.is_lan分支处理。TurnManager只关心状态转换和标志位。
+
