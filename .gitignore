@@ -3,3 +3,4 @@
 /android/
 
 .codely-cli/
+addons/lua-gdextension/build/~*
