@@ -1,12 +1,25 @@
 extends Node2D
 
-var draw_pile = []      # 牌库（P1）
-var discard_pile = []    # 弃牌堆（P1）
-var draw_pile_p2 = []    # 牌库（P2，双人模式）
-var discard_pile_p2 = [] # 弃牌堆（P2，双人模式）
+# ====================================================================
+# 武道牌途 · 主场景控制器
+#
+# 架构（Command Pattern，见 scripts/card_executor.gd）：
+#   出牌 = GDScript 算费用 → Lua 纯函数算「结果清单」→ CardExecutor 原子执行
+#   Lua 不可用/无实现 → _fallback_result 通用结算兜底
+#   旧的 700 行 match 分支 / 事务快照回滚 / EffectResource 效果系统已全部移除
+#
+# 回合追踪按玩家分开（_track[1] / _track[2]），修复共享回合下
+# P1/P2 互相污染计数的问题。
+# ====================================================================
+
+var draw_pile = []        # 牌库（P1）
+var discard_pile = []     # 弃牌堆（P1）
+var draw_pile_p2 = []     # 牌库（P2，双人模式）
+var discard_pile_p2 = []  # 弃牌堆（P2，双人模式）
 var game_over = false
 
 var turn_manager: TurnManager  # 回合状态机
+var card_scene: PackedScene    # 卡牌场景（运行时 load，避免编译期 preload 连坐失败）
 
 @onready var hand1 = $Hand1
 @onready var hand2 = $Hand2
@@ -46,14 +59,6 @@ var turn_manager: TurnManager  # 回合状态机
 
 var _active_player: int = 1  # 1=玩家1, 2=玩家2（仅用于UI切换）
 
-# 云芷卡牌追踪变量
-var last_played_card_type: int = -1  # 上一张打出的卡牌类型
-var last_played_card_id: String = ""  # 上一张打出的卡牌ID
-var skill_played_this_turn: int = 0   # 本回合打出技能牌计数
-var energy_used_this_turn: int = 0    # 本回合已消耗内力
-var consecutive_discount_used: bool = false  # 虚实相生第二段折扣是否已用
-var next_two_cards_discount: int = 0  # 虚实相生下两张折扣数
-
 # 当前活跃玩家的别名（方便现有代码直接引用）
 var hand: Node2D
 var player: Node
@@ -62,6 +67,85 @@ var player_name_label: Label
 var hp_label: Label
 var energy_label: Label
 var block_label: Label
+
+# ---- 回合追踪（按玩家分开，共享回合下互不污染） ----
+# 字段：skill_played / energy_used / cards_played / attacks_played /
+#       next_two_discount / last_type / last_id
+var _track: Dictionary = {1: {}, 2: {}}
+
+# ---- 非战斗节点完成守卫（联机下防止双方各推一次结果） ----
+var _node_result_done: bool = false
+# ---- 联机奖励流程（双端各自选完再开地图） ----
+var _p1_reward_done: bool = false
+var _p2_reward_done: bool = false
+# ---- 同屏双人奖励流程（P1 选完轮到 P2） ----
+var _reward_picker: int = 1
+
+var _scene_loaded: bool = false
+var _waiting_mask: ColorRect = null
+
+# ==============================
+# 模式查询 / 玩家上下文
+# ==============================
+
+## 当前是否双人模式。唯一数据源 GameData.is_dual_mode。
+func _is_dual() -> bool:
+	if turn_manager and is_instance_valid(turn_manager):
+		return turn_manager.is_dual()
+	return GameData.is_dual_mode
+
+
+## 联机下每个端固定操作自己的玩家：主机恒 P1，客机恒 P2。
+func _resolve_active_player(p: int) -> int:
+	if NetworkManager.is_lan:
+		return 1 if NetworkManager.is_host else 2
+	return p
+
+
+## 只切换"当前玩家别名"的指向，不碰 UI 可见性。
+func _apply_aliases(p: int) -> void:
+	if p == 2:
+		hand = hand2
+		player = player2
+		player_portrait = p2_portrait
+		player_name_label = p2_name_label
+		hp_label = p2_hp_label
+	else:
+		hand = hand1
+		player = player1
+		player_portrait = p1_portrait
+		player_name_label = p1_name_label
+		hp_label = p1_hp_label
+	# 场景里只有一套 EnergyLabel / BlockLabel，由 _update_ui 按 player 实时刷新
+	energy_label = p1_energy_label
+	block_label = p1_block_label
+
+
+## 在指定玩家的上下文里执行一段逻辑，结束后自动恢复别名。
+func _with_player(pid: int, fn: Callable) -> void:
+	var saved_active := _active_player
+	_active_player = pid
+	_apply_aliases(pid)
+	fn.call()
+	_active_player = saved_active
+	_apply_aliases(saved_active)
+
+
+func _player_node(pid: int) -> Player:
+	return player2 if pid == 2 else player1
+
+
+func _hand_node(pid: int) -> Hand:
+	return hand2 if pid == 2 else hand1
+
+
+func _draw_pile_of(pid: int) -> Array:
+	return draw_pile_p2 if pid == 2 else draw_pile
+
+
+func _discard_pile_of(pid: int) -> Array:
+	return discard_pile_p2 if pid == 2 else discard_pile
+
 
 # ---- 战斗场景资源 ----
 const BIOME_BG = {
@@ -94,15 +178,17 @@ const BIOME_ENEMIES = {
 	},
 }
 
-
 @onready var _battle_bg: TextureRect = $BattleBg
 
 
+# ==============================
+# 生命周期
+# ==============================
+
 func _ready():
-	# 设置 Lua 宿主引用
-	LuaRuntime.host = self
-	
-	# 先设置别名，确保信号触发时不会null
+	card_scene = load("res://scenes/card.tscn")
+
+	# 先设置别名，确保信号触发时不会 null
 	hand = hand1
 	player = player1
 	hp_label = p1_hp_label
@@ -129,171 +215,124 @@ func _ready():
 	reward_screen.card_chosen.connect(_on_reward_chosen)
 	reward_screen.skipped.connect(_on_reward_skipped)
 	shop_screen.continue_requested.connect(_on_shop_done)
+	shop_screen.buy_requested.connect(_on_shop_buy_requested)
+	shop_screen.delete_requested.connect(_on_shop_delete_requested)
 	node_map.node_selected.connect(_on_node_selected)
 	rest_screen.closed.connect(_on_rest_closed)
 	event_screen.closed.connect(_on_event_closed)
-	
+
 	# 断线/重连信号
 	if not NetworkManager.player_disconnected.is_connected(_on_player_disconnected):
 		NetworkManager.player_disconnected.connect(_on_player_disconnected)
 	if not NetworkManager.player_reconnected.is_connected(_on_player_reconnected):
 		NetworkManager.player_reconnected.connect(_on_player_reconnected)
-	
-	# 从存档恢复：直接显示地图
+
 	# 局域网：用共享种子保证地图/牌序一致
 	if NetworkManager.is_lan:
 		seed(NetworkManager.shared_seed)
-	
+
 	# 局域网客机：不执行任何逻辑，等主机推快照
 	if NetworkManager.is_lan and not NetworkManager.is_host:
 		if GameData.loading_save:
 			GameData.loading_save = false
-			player1.init()
-			player2.init(true)
-			_start_battle()
-			draw_pile = GameData.player_deck.duplicate()
-			draw_pile.shuffle()
-			if GameData.is_dual_mode:
-				draw_pile_p2 = GameData.player2_deck.duplicate()
-				draw_pile_p2.shuffle()
 			_show_waiting_mask("重连成功，同步状态...")
 		else:
 			_show_waiting_mask("等待主机同步状态...")
 		_scene_loaded = true
 		return
-	
+
 	if GameData.loading_save:
 		GameData.loading_save = false
+		_prepare_battle_ui()
 		node_map.open()
+		_scene_loaded = true
 		return
-	
+
 	# 新游戏：先选路再开打
 	if GameData.current_floor == 1 and not GameData.map_active:
 		GameData.generate_new_act()
+		_prepare_battle_ui()
 		node_map.open()
 		# LAN 主机：通知客机也打开地图
 		if NetworkManager.is_lan and NetworkManager.is_host:
 			NetworkManager.rpc("sync_show_map")
+		_scene_loaded = true
 		return
-	
-	# 初始化
+
+	# 地图已激活/楼层>1 的续战场景：直接开打
+	# （必须走 _reset_battle_state 初始化牌库，否则空牌库开局）
+	_reset_battle_state()
+
+	# 创建回合状态机（客机不启动，完全听主机指挥）
+	turn_manager = TurnManager.new()
+	turn_manager.name = "TurnManager"
+	add_child(turn_manager)
+	turn_manager.turn_started.connect(_on_turn_started)
+	turn_manager.turn_changed.connect(_on_turn_started)
+	turn_manager.start_battle()
+
+	_scene_loaded = true
+	_update_ui()
+
+
+## 战斗 UI 基础初始化（玩家节点 / 头像 / 可见性 / 退出按钮）
+func _prepare_battle_ui():
 	player1.init()
 	player2.init(true)
-	_start_battle()
-	
+
 	# 单人模式：隐藏玩家2
-	if not GameData.is_dual_mode:
+	if not _is_dual():
 		hand2.visible = false
 		p2_portrait.visible = false
 		p2_name_label.visible = false
 		p2_hp_label.visible = false
 		hand1.visible = true
-	
-	draw_pile = GameData.player_deck.duplicate()
-	draw_pile.shuffle()
-	
-	if GameData.is_dual_mode:
-		draw_pile_p2 = GameData.player2_deck.duplicate()
-		draw_pile_p2.shuffle()
-	
+
 	# 加载头像
 	if GameData.selected_character != "":
 		p1_portrait.texture = load("res://assets/images/player/%s.tres" % GameData.selected_character)
 		p1_name_label.text = GameData.character_data[GameData.selected_character]["name"]
-	if GameData.is_dual_mode and GameData.selected_character_2 != "":
+	if _is_dual() and GameData.selected_character_2 != "":
 		p2_portrait.texture = load("res://assets/images/player/%s.tres" % GameData.selected_character_2)
 		p2_name_label.text = GameData.character_data[GameData.selected_character_2]["name"]
 	else:
 		p2_name_label.text = "玩家2"
-	
-	# 设置退出按钮（角落常显）
+
+	# 退出按钮（角落常显）
 	menu_btn.text = "✕"
 	menu_btn.size = Vector2(36, 36)
 	menu_btn.position = Vector2(10, 10)
 	menu_btn.visible = true
-	
-	# 创建回合状态机（客机不启动，完全听主机指挥）
-	turn_manager = TurnManager.new()
-	turn_manager.name = "TurnManager"
-	add_child(turn_manager)
-	
-	if NetworkManager.is_lan and not NetworkManager.is_host:
-		# 客机：不启动 TurnManager，等主机的 RPC 驱动
-		_switch_to(1)
-		_update_ui()
-		_show_waiting_mask("等待主机同步状态...")
-		_update_deck_ui()
-	else:
-		turn_manager.turn_started.connect(_on_turn_started)
-		turn_manager.turn_changed.connect(_on_turn_started)
-		turn_manager.start_battle(GameData.is_dual_mode)
-	
-	_scene_loaded = true
+
 	_update_ui()
 
 
 # ==============================
 # 回合状态机回调
-# TurnManager 驱动，单/双人统一处理
 # ==============================
 
-var _scene_loaded: bool = false
-
 func _on_turn_started(turn: int):
-	# 重置回合追踪变量
-	skill_played_this_turn = 0
-	energy_used_this_turn = 0
-	next_two_cards_discount = 0
-	consecutive_discount_used = false
-	
 	_apply_turn(turn)
-	
 	# 局域网：主机同步回合给客机
 	if NetworkManager.is_lan and NetworkManager.is_host:
 		NetworkManager.push_snapshot()
 
 
-func network_sync_turn(turn: int):
-	"""客机收到主机回合同步后执行"""
-	# 同步屏障：场景未就绪则等待
-	if not _scene_loaded:
-		await get_tree().process_frame
-	
-	# 重置回合追踪变量
-	skill_played_this_turn = 0
-	energy_used_this_turn = 0
-	next_two_cards_discount = 0
-	consecutive_discount_used = false
-	_apply_turn(turn)
-
-
 func _apply_turn(turn: int):
 	match turn:
 		TurnManager.Turn.PLAYER1:
-			_switch_to(1)
-			_switch_draw(hand1, draw_pile, discard_pile)
-			player1.refill_energy()
-			if GameData.is_dual_mode:
-				player2.refill_energy()
-				_switch_draw(hand2, draw_pile_p2, discard_pile_p2)
-			_trigger_power_effects()
+			# 共享回合：双方各自抽牌/回能/触发 POWER（存活的才处理）
+			if not _is_dual():
+				_start_player_turn(1)
+			else:
+				_start_player_turn(1)
+				_start_player_turn(2)
 			end_turn_btn.text = "结束回合"
 			end_turn_btn.disabled = false
-			_update_ui()
+			_switch_to(_active_player)
 			_update_deck_ui()
 			_refresh_card_previews()
-		
-		TurnManager.Turn.PLAYER2:
-			# 旧路径保留：单人模式不会走到这里
-			_switch_to(2)
-			_switch_draw(hand2, draw_pile_p2, discard_pile_p2)
-			player2.refill_energy()
-			end_turn_btn.text = "结束回合"
-			end_turn_btn.disabled = false
-			_update_ui()
-			_update_deck_ui()
-			_refresh_card_previews()
-		
+
 		TurnManager.Turn.ENEMY:
 			end_turn_btn.disabled = true
 			end_turn_btn.text = "敌人回合..."
@@ -302,8 +341,52 @@ func _apply_turn(turn: int):
 			_execute_enemy_turn.call_deferred()
 
 
+## 单个玩家的回合开始处理：回能 → 重置追踪 → 抽牌 → POWER 触发
+func _start_player_turn(pid: int):
+	var p := _player_node(pid)
+	var h := _hand_node(pid)
+
+	# 已阵亡的玩家：自动标记结束，不抽牌（合作模式另一人继续）
+	if p.hp <= 0:
+		if turn_manager and _is_dual():
+			turn_manager.mark_player_ended(pid)
+		return
+
+	_with_player(pid, func():
+		p.refill_energy()
+		_reset_turn_track(pid)
+
+		var draw_count := CardExecutor.DRAW_PER_TURN
+		# 夜啸被动【血影】：HP<50% 时回合开始多抽1张
+		if p.character_id == "yexiao" and p.hp < p.max_hp * 0.5:
+			draw_count += 1
+			print("【被动·血影】HP<50%% → 多抽1张牌")
+
+		var ex := _make_executor(pid)
+		ex.draw_cards(draw_count)
+		_trigger_power_effects(p, pid)
+		h.apply_limit_mod(p.hand_limit_mod)
+	)
+
+
+func _reset_turn_track(pid: int) -> void:
+	_track[pid] = {
+		"skill_played": 0,
+		"energy_used": 0,
+		"cards_played": 0,
+		"attacks_played": 0,
+		"next_two_discount": 0,
+		"last_type": -1,
+		"last_id": "",
+	}
+
+
 func _execute_enemy_turn():
-	var alive = gm.execute_enemy_turn(player1, enemy)
+	# 双人模式：敌人从存活玩家中随机选目标（宿主权威 RNG）
+	var players: Array = [player1]
+	if _is_dual():
+		players = [player1, player2]
+	var alive = gm.execute_enemy_turn(players, enemy)
 	if game_over:
 		return
 	if alive:
@@ -311,116 +394,54 @@ func _execute_enemy_turn():
 
 
 # ==============================
-# 玩家操作别名（方便现有代码引用）
+# 玩家切换 / 可见性
 # ==============================
 
 func _switch_to(p: int):
+	p = _resolve_active_player(p)
 	_active_player = p
-	
-	if NetworkManager.is_lan:
-		if NetworkManager.is_host:
-			hand = hand1
-			player = player1
-			player_portrait = p1_portrait
-			player_name_label = p1_name_label
-			hp_label = p1_hp_label
-			energy_label = p1_energy_label
-			block_label = p1_block_label
-			hand1.visible = true
-			hand2.visible = false
-			_hide_waiting_mask()
-		else:
-			hand = hand2
-			player = player2
-			player_portrait = p2_portrait
-			player_name_label = p2_name_label
-			hp_label = p2_hp_label
-			energy_label = p1_energy_label
-			block_label = p1_block_label
-			hand1.visible = false
-			hand2.visible = true
-			_hide_waiting_mask()
-	else:
-		# 同屏模式：只显示当前激活玩家的手牌
-		if p == 1:
-			hand = hand1
-			player = player1
-			player_portrait = p1_portrait
-			player_name_label = p1_name_label
-			hp_label = p1_hp_label
-			energy_label = p1_energy_label
-			block_label = p1_block_label
-		else:
-			hand = hand2
-			player = player2
-			player_portrait = p2_portrait
-			player_name_label = p2_name_label
-			hp_label = p2_hp_label
-			energy_label = p1_energy_label
-			block_label = p1_block_label
-		
-		if GameData.is_dual_mode:
-			# 双人同屏：只显示当前激活玩家的手牌
-			hand1.visible = (p == 1)
-			hand2.visible = (p == 2)
-		else:
-			hand1.visible = true
-			hand2.visible = false
-	
+	_apply_aliases(p)
+	_update_player_visibility(p)
 	_update_ui()
 	_update_active_indicator()
+
+
+func _update_player_visibility(p: int) -> void:
+	if NetworkManager.is_lan:
+		# 联机：每个端只看得到自己的手牌
+		hand1.visible = NetworkManager.is_host
+		hand2.visible = not NetworkManager.is_host
+		_hide_waiting_mask()
+	elif _is_dual():
+		# 双人同屏：只显示当前激活玩家的手牌
+		hand1.visible = (p == 1)
+		hand2.visible = (p == 2)
+	else:
+		hand1.visible = true
+		hand2.visible = false
 
 
 func _on_p1_portrait_clicked(event: InputEvent):
 	if event is InputEventMouseButton and event.pressed:
 		if NetworkManager.is_lan:
 			return
-		if GameData.is_dual_mode and not NetworkManager.is_lan:
-			if not turn_manager.p1_ended:
-				_switch_to(1)
+		if _is_dual() and turn_manager and not turn_manager.has_player_ended(1):
+			_switch_to(1)
 
 
 func _on_p2_portrait_clicked(event: InputEvent):
 	if event is InputEventMouseButton and event.pressed:
 		if NetworkManager.is_lan:
 			return
-		if GameData.is_dual_mode and not NetworkManager.is_lan:
-			if not turn_manager.p2_ended:
-				_switch_to(2)
-
-
-# ==============================
-# 牌库操作
-# ==============================
-
-func _switch_draw(h: Node2D, pile: Array, discard_ref: Array, count: int = 4):
-	"""给指定手牌抽指定数量牌，牌库空则回收对应的弃牌堆"""
-	var card_scene = load("res://scenes/card.tscn")
-	for i in range(count):
-		if pile.size() == 0:
-			if discard_ref.size() > 0:
-				# 回收弃牌堆到牌库
-				for cid in discard_ref:
-					pile.append(cid)
-				discard_ref.clear()
-				pile.shuffle()
-			else:
-				break
-		var card_id = pile.pop_back()
-		var path = "res://resources/cards/%s.tres" % card_id
-		var data = load(path)
-		var card = CardPool.acquire(card_scene)
-		card.setup(data)
-		if not h.add_card(card):
-			CardPool.release(card)
-	print("抽牌完成")
+		if _is_dual() and turn_manager and not turn_manager.has_player_ended(2):
+			_switch_to(2)
 
 
 func _unhandled_input(event):
 	if event is InputEventMouseButton \
 	and event.pressed \
 	and event.button_index == MOUSE_BUTTON_LEFT:
-		if GameData.is_dual_mode and not NetworkManager.is_lan:
+		if _is_dual() and not NetworkManager.is_lan:
 			hand1.deselect()
 			hand2.deselect()
 		else:
@@ -428,13 +449,13 @@ func _unhandled_input(event):
 
 
 # ==============================
-# 出牌
+# 出牌（Command Pattern 单一路径）
 # ==============================
 
 func _on_card_played(card):
 	if game_over:
 		return
-	
+
 	# 判断牌属于哪个玩家
 	var card_owner = 0
 	if card.get_parent() == hand1:
@@ -443,915 +464,309 @@ func _on_card_played(card):
 		card_owner = 2
 	else:
 		return
-	
+
 	# 双人同屏：只能出当前激活玩家的牌，已结束回合的不能出
-	if GameData.is_dual_mode and not NetworkManager.is_lan:
+	if _is_dual() and not NetworkManager.is_lan:
 		if card_owner != _active_player:
-			print("[拒绝] 当前激活的是P%d，不能出P%d的牌" % [_active_player, card_owner])
 			return
-		if turn_manager:
-			if card_owner == 1 and turn_manager.p1_ended:
-				return
-			if card_owner == 2 and turn_manager.p2_ended:
-				return
-	
+		if turn_manager and turn_manager.has_player_ended(card_owner):
+			return
+
 	# LAN 模式：主机只能出P1，客机只能出P2
 	if NetworkManager.is_lan:
 		if NetworkManager.is_host and card_owner != 1:
 			return
 		if not NetworkManager.is_host and card_owner != 2:
 			return
-		# 已结束回合的不能出
-		if turn_manager:
-			if card_owner == 1 and turn_manager.p1_ended:
-				return
-			if card_owner == 2 and turn_manager.p2_ended:
-				return
-	
+		if turn_manager and turn_manager.has_player_ended(card_owner):
+			return
+
 	# 切换别名到出牌方
 	_switch_to(card_owner)
-	
-	var _caller = "主机" if NetworkManager.is_host else "客机" if NetworkManager.is_lan else "单机"
-	print("[%s] P%d 出牌: %s" % [_caller, card_owner, card.card_data.card_id])
-	
-	# LAN 模式：客机 P2 出牌 → 发 RPC 给主机执行
+
+	# LAN 客机：出牌请求发给主机执行
 	if NetworkManager.is_lan and not NetworkManager.is_host:
 		NetworkManager.rpc_id(1, "request_play", card.card_data.card_id, 2)
 		return
-	
+
 	# 主机 / 单机：直接执行
 	_execute_card(card)
-	
+
 	# 主机执行完后推快照
 	if NetworkManager.is_lan and NetworkManager.is_host:
 		NetworkManager.push_snapshot()
 
 
-	
-func _execute_card(card):
-	var data = card.card_data
+## 费用计算的唯一入口。返回 {cost, used_next, used_two}。
+## 折扣只在出牌成功后才消耗（修复：出牌失败吞折扣的旧 bug）。
+func _calc_card_cost(data: CardData, pid: int) -> Dictionary:
+	var p := _player_node(pid)
+	var t: Dictionary = _track[pid]
+	var cost := data.cost
 
-	# ===== 费用（凌波微步折扣） =====
-	var actual_cost = data.cost
-	# 逍遥游：攻击/内力牌费用-1
-	if player.attack_discounted and (data.card_type == CardData.CardType.ATTACK or data.card_type == CardData.CardType.INNER):
-		actual_cost = max(0, actual_cost - 1)
-	# 凌波微步折扣
-	if player.next_card_discount > 0:
-		actual_cost = max(0, actual_cost - player.next_card_discount)
-		player.next_card_discount = 0
-	# 虚实相生折扣
-	if next_two_cards_discount > 0:
-		var dc = mini(actual_cost, next_two_cards_discount)
-		actual_cost -= dc
-		next_two_cards_discount -= dc
-		consecutive_discount_used = true
-	if not player.spend_energy(actual_cost):
+	# 逍遥游 POWER：攻击/内力牌永久 -1
+	if p.attack_discounted and (data.card_type == CardData.CardType.ATTACK or data.card_type == CardData.CardType.INNER):
+		cost = max(0, cost - 1)
+
+	# 凌波微步：下一张牌 -N
+	var used_next := 0
+	if p.next_card_discount > 0:
+		used_next = min(cost, p.next_card_discount)
+		cost -= used_next
+
+	# 虚实相生：下 N 张牌 -2/-3
+	var used_two := 0
+	var two_left := int(t.get("next_two_discount", 0))
+	if two_left > 0:
+		used_two = min(cost, two_left)
+		cost -= used_two
+
+	# 云芷被动【奇策】：每回合第一次出牌费用-1
+	if p.character_id == "yunzhi" and int(t.get("cards_played", 0)) == 0 and cost > 0:
+		cost = max(0, cost - 1)
+
+	return {"cost": cost, "used_next": used_next, "used_two": used_two}
+
+
+## 打出一张卡：算费用 → 算清单 → 原子执行
+func _execute_card(card):
+	var data: CardData = card.card_data
+	var pid := _active_player
+	var t: Dictionary = _track[pid]
+
+	# ---- 费用 ----
+	var calc := _calc_card_cost(data, pid)
+	if not player.spend_energy(calc.cost):
+		# 内力不足：不消耗任何折扣，取消选中
+		hand.deselect()
+		print("[费用不足] %s 需要 %d 内力" % [data.card_name, calc.cost])
 		return
-	energy_used_this_turn += actual_cost
-	
-	# 追踪上一张牌
-	last_played_card_type = data.card_type
-	last_played_card_id = data.card_id
+
+	# ---- 成功：消耗折扣 + 更新追踪 ----
+	player.next_card_discount = 0
+	t["next_two_discount"] = int(t.get("next_two_discount", 0)) - calc.used_two
+	t["energy_used"] = int(t.get("energy_used", 0)) + calc.cost
+	t["last_type"] = data.card_type
+	t["last_id"] = data.card_id
+	t["cards_played"] = int(t.get("cards_played", 0)) + 1
+	if data.card_type == CardData.CardType.ATTACK:
+		t["attacks_played"] = int(t.get("attacks_played", 0)) + 1
 	if data.card_type == CardData.CardType.SKILL:
-		skill_played_this_turn += 1
-	
-	# ===== Lua 热更路径（PoC） =====
+		t["skill_played"] = int(t.get("skill_played", 0)) + 1
+
+	# ---- 计算结果清单：Lua 纯函数优先，GDScript 通用结算兜底 ----
+	var result := {}
 	if LuaRuntime and LuaRuntime.enabled:
-		var lua_result = _try_execute_card_via_lua(card, data, actual_cost)
-		if lua_result:
-			return
-	
-	# ===== NEW: 效果系统（优先执行） =====
-	if data.has_effects():
-		_execute_card_via_effects(card, data)
-		return
-	
-	# ===== 效果计算（旧版回退） =====
-	var times = max(1, data.repeat)
-	# 基础值统一从 .tres 读取（含境界加成），match分支只处理特殊逻辑
-	var dmg = data.damage + GameData.get_damage_bonus()
-	var blk = data.block + GameData.get_block_bonus()
-	var eg = data.energy_gain
-	var extra_draw = 0
-	var is_consumed = false  # true=POWER/小无相功 不进弃牌
-	
-	match data.card_id:
-		# ---- 基础牌特殊结算 ----
-		"punch":
-			dmg = GameData.get_punch_damage()
-		"meditate":
-			eg = GameData.get_meditate_gain()
-		
-		# ---- 🏯 少林（chan 特殊效果追加，基础值来自 .tres） ----
-		"sl_fist":
-			player.chan += 1
-			print("罗汉拳 禅意+1 (%d)" % player.chan)
-		"sl_iron":
-			player.chan += 1
-			print("铁布衫 禅意+1 (%d)" % player.chan)
-		"sl_golden":
-			blk += player.chan * 3
-			print("金钟罩 消耗%d层禅意 → 格挡%d" % [player.chan, blk])
-			player.chan = 0
-		"sl_arhat":
-			dmg += player.chan * 4
-			print("罗汉伏魔 消耗%d层禅意 → 伤害%d" % [player.chan, dmg])
-			player.chan = 0
-		"sl_damo":
-			player.power_damo = true
-			is_consumed = true
-			print("达摩一苇 激活！")
-		
-		# ---- ☯️ 武当（jianyi 特殊效果追加，基础值来自 .tres） ----
-		"wd_taiji":
-			player.jianyi += 1
-			print("太极拳 剑意+1 (%d)" % player.jianyi)
-		"wd_soft":
-			if player.jianyi > 0:
-				dmg += 4
-				player.jianyi -= 1
-				print("柔云剑 消耗1剑意 → 伤害%d" % dmg)
-		"wd_steps":
-			if player.jianyi > 0:
-				extra_draw = 1
-				player.jianyi -= 1
-				print("梯云纵 消耗1剑意 → 多抽1")
-		"wd_heavy":
-			dmg = player.jianyi * 5
-			print("真武重剑 消耗%d层剑意 → 伤害%d" % [player.jianyi, dmg])
-			player.jianyi = 0
-		"wd_twoway":
-			player.power_twoway = true
-			player.first_hit_this_turn = true
-			is_consumed = true
-			print("太极两仪 激活！")
-		
-		# ---- 🦋 逍遥（基础值来自 .tres，match只做特殊效果） ----
-		"xy_beiming":
-			pass  # heal 直接用 data.heal = 2
-		"xy_lingbo":
-			player.next_card_discount = 1
-			print("凌波微步 下张牌费用-1")
-		"xy_wuxiang":
-			is_consumed = true
-			var copied_id = ""
-			var reversed = discard_pile.duplicate()
-			reversed.reverse()
-			for cid in reversed:
-				if cid not in ["sl_damo","wd_twoway","xy_bahuang","xy_wuxiang"]:
-					copied_id = cid
-					break
-			if copied_id != "":
-				var cpath = "res://resources/cards/%s.tres" % copied_id
-				var cdata = load(cpath)
-				var cscene = load("res://scenes/card.tscn")
-				var new_card = CardPool.acquire(cscene)
-				new_card.setup(cdata)
-				hand.add_card(new_card)
-				print("小无相功 复制 -> %s" % copied_id)
-			else:
-				print("小无相功 弃牌堆无牌可复制")
-		"xy_zhemel":
-			if hand.cards.size() <= 3:
-				dmg = 12
-				print("天山折梅手 手牌≤3 → 伤害12")
-		"xy_bahuang":
-			player.power_bahuang = true
-			is_consumed = true
-			print("八荒六合 激活！")
-		
-		# ---- 🦋 云芷新卡（基础值来自 .tres，match只做条件追加） ----
-		
-		"xy_xiaoyaoyou":
-			player.power_xiaoyaoyou = true
-			is_consumed = true
-			print("逍遥游 激活！")
-		
-		"xy_xingluo":
-			if hand.cards.size() >= 6:
-				dmg += 5
-				print("星落九天 手牌≥6 → 伤害%d" % dmg)
-		
-		"xy_fengjuan":
-			dmg += mini(hand.cards.size(), 4)
-			print("风卷残云 手牌%d张 → 伤害%d" % [hand.cards.size(), dmg])
-		
-		"xy_guicang":
-			extra_draw = 2
-			if hand.cards.size() >= 5:
-				extra_draw = 3
-				print("归藏于渊 手牌≥5 → 抽3")
-		
-		"xy_fuguang":
-			extra_draw = 1
-			if hand.cards.size() <= 3:
-				extra_draw = 2
-				print("浮光掠影 手牌≤3 → 抽2")
-		
-		"xy_yufeng":
-			if hand.cards.size() >= 4:
-				blk += 4
-				print("御风而行 手牌≥4 → 格挡%d" % blk)
-		
-		"xy_duanliu":
-			# 弃1张牌，伤害+3
-			var to_discard = null
-			for c in hand.cards:
-				if c != card:
-					to_discard = c
-					break
-			if to_discard != null:
-				dmg += 3
-				var dc = discard_pile_p2 if _active_player == 2 else discard_pile
-				dc.append(to_discard.card_data.card_id)
-				hand.remove_card(to_discard)
-				CardPool.release(to_discard)
-				print("断水流 弃牌→伤害%d" % dmg)
-		
-		"xy_wanxiang":
-			dmg = hand.cards.size() * 3
-			print("万象归一 手牌%d张 → 伤害%d" % [hand.cards.size(), dmg])
-			# 弃掉所有手牌
-			var dc = discard_pile_p2 if _active_player == 2 else discard_pile
-			for c in hand.cards.duplicate():
-				if c != card:
-					dc.append(c.card_data.card_id)
-					hand.remove_card(c)
-					CardPool.release(c)
-		
-		"xy_xiuli":
-			# 将1张手牌移至牌顶。若移除的是攻击牌，抽1张
-			var to_move = null
-			for c in hand.cards:
-				if c != card:
-					to_move = c
-					break
-			if to_move != null:
-				var dp = draw_pile_p2 if _active_player == 2 else draw_pile
-				dp.append(to_move.card_data.card_id)
-				var is_attack = to_move.card_data.card_type == CardData.CardType.ATTACK
-				hand.remove_card(to_move)
-				CardPool.release(to_move)
-				if is_attack:
-					extra_draw += 1
-					print("袖里乾坤 移走攻击牌 → 抽1")
-		
-		"xy_lianhuan":
-			blk = skill_played_this_turn * 2
-			print("连环计 本回合打出%d张技能 → 格挡%d" % [skill_played_this_turn, blk])
-		
-		"xy_houfa":
-			if last_played_card_type == CardData.CardType.ATTACK:
-				blk = 8
-				extra_draw = 1
-				print("后发制人 上张是攻击 → 格挡8, 抽1")
-		
-		"xy_jinghua":
-			if last_played_card_id != "" and last_played_card_id != "xy_jinghua":
-				var last_path = "res://resources/cards/%s.tres" % last_played_card_id
-				var last_data = load(last_path)
-				if last_data and last_data.card_type != CardData.CardType.POWER:
-					var cscene = load("res://scenes/card.tscn")
-					var new_card = CardPool.acquire(cscene)
-					new_card.setup(last_data)
-					hand.add_card(new_card)
-					print("镜花水月 复制 -> %s" % last_played_card_id)
-				else:
-					print("镜花水月 上一张是POWER/无效，跳过")
-			else:
-				print("镜花水月 无上一张牌，跳过")
-		
-		"xy_wujian":
-			if last_played_card_type == CardData.CardType.SKILL:
-				dmg *= 2
-				print("无间道 上张是技能 → 伤害%d" % dmg)
-		
-		"xy_xushi":
-			next_two_cards_discount = 2
-			if consecutive_discount_used:
-				next_two_cards_discount = 3
-				print("虚实相生 连续技能 → 下3减")
-			else:
-				print("虚实相生 下2减")
-		
-		"xy_yixing":
-			extra_draw = 1
-			if last_played_card_type == CardData.CardType.MOVEMENT:
-				extra_draw = 2
-				print("移形换影 上张是移动 → 抽2")
-		
-		"xy_hantan":
-			eg = 1
-			if player.energy >= player.max_energy - 1:
-				eg = 2
-				print("寒潭映月 满内力 → 得2内力")
-		
-		"xy_qiguan":
-			if player.energy >= 2:
-				player.energy -= 2
-				energy_used_this_turn += 2
-				player.energy_changed.emit(player.energy, player.max_energy)
-				dmg += 6
-				print("气贯长虹 额外+2内力 → 伤害%d" % dmg)
-		
-		"xy_tuna":
-			eg = 2
-			if energy_used_this_turn <= actual_cost:
-				eg = 3
-				print("吐纳归元 未额外消耗内力 → 回3内力")
-		
-		"xy_longxiang":
-			player.power_longxiang = true
-			is_consumed = true
-			print("龙象般若 激活！")
-		
-		"xy_baoyuan":
-			if energy_used_this_turn == 0:
-				blk += 5
-				print("抱元守一 未消耗内力 → 格挡%d" % blk)
-		
-		"xy_xixing":
-			if enemy.block > 0:
-				dmg += 5
-				player.heal(dmg)
-				print("吸星大法 敌有护盾 → 伤害%d, 回%dHP" % [dmg, dmg])
-		
-		"xy_guanxing":
-			if enemy.intent_type == enemy.IntentType.DEFEND:
-				blk = 6
-				print("观星望斗 敌人防御 → 格挡6")
-		
-		"xy_fange":
-			if enemy.intent_type == enemy.IntentType.ATTACK:
-				dmg = 16
-				print("反戈一击 敌人攻击 → 伤害%d" % dmg)
-		
-		"xy_yibizhi":
-			blk = enemy.intent_value
-			print("以彼之道 复制%d点格挡" % blk)
-		
-		"xy_duotian":
-			if float(enemy.hp) / float(enemy.max_hp) < 0.3:
-				dmg = 30
-				print("夺天造化 敌人血量<30%% → 伤害%d" % dmg)
-		
-		# ---- 通用基础卡：已通过顶部的 dmg/blk/eg 从 .tres 赋值 ----
-		_:
-			pass
-	
-	# 🦋 龙象般若：未使用内力提供伤害加成
-	if player.power_longxiang and dmg > 0:
-		var bonus = player.energy * 2
-		dmg += bonus
-		print("龙象般若 未用内力%d → 伤害+%d" % [player.energy, bonus])
-	
-	# ===== 执行伤害/格挡/回血 =====
-	for i in range(times):
-		if dmg > 0 or data.armor_break > 0:
-			enemy.take_damage(dmg, data.armor_break)
-		if blk > 0:
-			player.add_block(blk)
-		if data.heal > 0:
-			player.heal(data.heal)
-	
-	if eg > 0:
-		player.gain_energy(eg)
-	
-	# ===== 抽牌 =====
-	if data.draw + extra_draw > 0:
-		var dp = draw_pile_p2 if _active_player == 2 else draw_pile
-		var dc = discard_pile_p2 if _active_player == 2 else discard_pile
-		_switch_draw(hand, dp, dc, data.draw + extra_draw)
-	
-	# ===== 弃牌/消耗 =====
-	if not is_consumed:
-		var dc = discard_pile_p2 if _active_player == 2 else discard_pile
-		dc.append(card.card_data.card_id)
-	
-	hand.remove_card(card)
-	CardPool.release(card)
+		var ctx := _build_state_ctx(pid, calc.cost)
+		_merge_card_fields(ctx, data)
+		result = LuaRuntime.execute_card(data.card_id, ctx)
+	if result.is_empty():
+		result = _fallback_result(data)
+
+	# ---- 原子执行 ----
+	var ex := _make_executor(pid)
+	ex.played_card = card
+	ex.played_card_id = data.card_id
+	ex.played_card_type = data.card_type
+	ex.apply(result)
+
 	_update_deck_ui()
 	_update_sect_ui()
-	
-	if enemy.hp <= 0:
+
+	if enemy.hp <= 0 and not game_over:
 		_on_battle_end(true)
 
 
-# ====================================================================
-# Lua 热更路径（PoC）
-# 尝试用 Lua 执行卡牌效果，成功返回 true，无实现返回 false
-# ====================================================================
-
-func _try_execute_card_via_lua(card, data: CardData, actual_cost: int) -> bool:
-	# ===== 事务快照：Lua 报错时回滚 =====
-	var snap = _snapshot_battle_state()
-	
-	# 构建上下文
-	var ctx = {
-		"card_id": data.card_id,
-		"cost": data.cost,
-		"card_type": data.card_type,
-		"damage": data.damage,
-		"block": data.block,
+## Lua 不可用时的通用结算（数值来自 .tres + 少量特例）。
+## 这是降级兜底，完整效果逻辑以 lua/cards/ 为准。
+func _fallback_result(data: CardData) -> Dictionary:
+	var r := {
+		"damage": data.damage + GameData.get_damage_bonus(),
+		"block": data.block + GameData.get_block_bonus(),
 		"heal": data.heal,
 		"draw": data.draw,
 		"energy_gain": data.energy_gain,
-		"repeat": data.repeat,
+		"repeat_count": max(1, data.repeat),
 		"armor_break": data.armor_break,
-		"school": data.school,
-		"player_hp": player.hp,
-		"player_max_hp": player.max_hp,
-		"player_energy": player.energy,
-		"player_block": player.block,
-		"player_chan": player.chan,
-		"player_jianyi": player.jianyi,
-		"player_next_card_discount": player.next_card_discount,
-		"enemy_hp": enemy.hp,
-		"enemy_max_hp": enemy.max_hp,
+		"is_consumed": false,
+	}
+	match data.card_id:
+		"punch":
+			r["damage"] = GameData.get_punch_damage()
+		"meditate":
+			r["energy_gain"] = GameData.get_meditate_gain()
+		"sl_damo":
+			r["set_power"] = "damo"; r["is_consumed"] = true
+		"wd_twoway":
+			r["set_power"] = "twoway"; r["is_consumed"] = true
+		"xy_bahuang":
+			r["set_power"] = "bahuang"; r["is_consumed"] = true
+		"xy_longxiang":
+			r["set_power"] = "longxiang"; r["is_consumed"] = true
+		"xy_xiaoyaoyou":
+			r["set_power"] = "xiaoyaoyou"; r["is_consumed"] = true
+		"sl_fist", "sl_iron":
+			r["chan_add"] = 1
+		"wd_taiji":
+			r["jianyi_add"] = 1
+		_:
+			pass
+	return r
+
+
+# ==============================
+# 统一状态打包（TODO P2/P3：出牌与预览共用一份）
+# ==============================
+
+## 打包指定玩家的战斗只读上下文（不含卡牌自身字段，由调用方合并）。
+func _build_state_ctx(pid: int, actual_cost: int = 0) -> Dictionary:
+	var p := _player_node(pid)
+	var t: Dictionary = _track[pid]
+	var dc := _discard_pile_of(pid)
+	return {
+		# 玩家
+		"player_hp": p.hp, "player_max_hp": p.max_hp,
+		"player_energy": p.energy, "player_max_energy": p.max_energy,
+		"player_block": p.block,
+		"player_chan": p.chan, "player_jianyi": p.jianyi,
+		"player_next_card_discount": p.next_card_discount,
+		# 敌人
+		"enemy_hp": enemy.hp, "enemy_max_hp": enemy.max_hp,
 		"enemy_block": enemy.block,
-		"enemy_intent_type": enemy.intent_type,
-		"enemy_intent_value": enemy.intent_value,
-		"hand_size": hand.cards.size(),
-		"last_played_card_id": last_played_card_id,
-		"last_played_card_type": last_played_card_type,
-		"skill_played_this_turn": skill_played_this_turn,
-		"energy_used_this_turn": energy_used_this_turn,
+		"enemy_intent_type": enemy.intent_type, "enemy_intent_value": enemy.intent_value,
+		# 手牌/弃牌
+		"hand_size": _hand_node(pid).cards.size(),
+		"discard_csv": ",".join(PackedStringArray(dc)),
+		# 回合追踪
+		"last_played_card_id": t.get("last_id", ""),
+		"last_played_card_type": t.get("last_type", -1),
+		"skill_played_this_turn": t.get("skill_played", 0),
+		"energy_used_this_turn": t.get("energy_used", 0),
+		"cards_played_this_turn": t.get("cards_played", 0),
+		"attacks_played_this_turn": t.get("attacks_played", 0),
+		"actual_cost": actual_cost,
+		# 境界加成
 		"damage_bonus": GameData.get_damage_bonus(),
 		"block_bonus": GameData.get_block_bonus(),
-	}
-	
-	var result = LuaRuntime.execute_card(data.card_id, ctx)
-	if result.is_empty():
-		# Lua 报错或无实现 → 回滚到执行前
-		_rollback_battle_state(snap)
-		return false
-	
-	# 提取结果
-	var dmg = int(result.get("damage", 0))
-	var blk = int(result.get("block", 0))
-	var heal_amt = int(result.get("heal", 0))
-	var extra_draw = int(result.get("draw", 0))
-	var eg = int(result.get("energy_gain", 0))
-	var is_consumed = result.get("is_consumed", false)
-	var special = result.get("special", "")
-	var repeat_times = int(result.get("repeat_count", 1))
-	repeat_times = max(1, repeat_times)
-	
-	print("[Lua] %s → dmg=%d blk=%d heal=%d draw=%d energy=%d consumed=%s" % [
-		data.card_id, dmg, blk, heal_amt, extra_draw, eg, is_consumed])
-	
-	# 处理特殊效果
-	match special:
-		"chan_plus_1":
-			player.chan += 1
-			print("  [Lua] 禅意+1 (%d)" % player.chan)
-		"chan_reset":
-			print("  [Lua] 消耗%d层禅意" % player.chan)
-			player.chan = 0
-		"jianyi_plus_1":
-			player.jianyi += 1
-			print("  [Lua] 剑意+1 (%d)" % player.jianyi)
-		"jianyi_minus_1":
-			player.jianyi = max(0, player.jianyi - 1)
-			print("  [Lua] 剑意-1 (%d)" % player.jianyi)
-		"jianyi_reset":
-			print("  [Lua] 消耗%d层剑意" % player.jianyi)
-			player.jianyi = 0
-		_:
-			if special.begins_with("set_discount_"):
-				var discount_val = int(special.substr(len("set_discount_")))
-				next_two_cards_discount = discount_val
-				if consecutive_discount_used:
-					next_two_cards_discount = discount_val + 1
-					print("  [Lua] 虚实相生 连续技能 → 下%d减" % next_two_cards_discount)
-				else:
-					print("  [Lua] 虚实相生 下%d减" % next_two_cards_discount)
-	
-	# 龙象般若：未使用内力提供伤害加成
-	if player.power_longxiang and dmg > 0:
-		var bonus = player.energy * 2
-		dmg += bonus
-		print("  [Lua] 龙象般若 内力%d → 伤害+%d" % [player.energy, bonus])
-	
-	# 执行效果
-	for i in range(repeat_times):
-		if dmg > 0 or data.armor_break > 0:
-			enemy.take_damage(dmg, data.armor_break)
-		if blk > 0:
-			player.add_block(blk)
-		if heal_amt > 0:
-			player.heal(heal_amt)
-	
-	if eg > 0:
-		player.gain_energy(eg)
-	elif eg < 0:
-		var spend = -eg
-		player.energy = max(0, player.energy - spend)
-		energy_used_this_turn += spend
-		player.energy_changed.emit(player.energy, player.max_energy)
-	
-	# 抽牌
-	if extra_draw > 0:
-		var dp = draw_pile_p2 if _active_player == 2 else draw_pile
-		var dc = discard_pile_p2 if _active_player == 2 else discard_pile
-		_switch_draw(hand, dp, dc, extra_draw)
-	
-	# 弃牌/消耗
-	if not is_consumed:
-		var dc = discard_pile_p2 if _active_player == 2 else discard_pile
-		dc.append(card.card_data.card_id)
-	
-	hand.remove_card(card)
-	CardPool.release(card)
-	_update_deck_ui()
-	_update_sect_ui()
-	
-	if enemy.hp <= 0:
-		_on_battle_end(true)
-	
-	return true
-
-
-# ===== 事务快照：保存/回滚战斗状态 =====
-
-func _snapshot_battle_state() -> Dictionary:
-	# 保存手牌ID列表（按玩家分）
-	var p1_hand_ids: Array = []
-	var p2_hand_ids: Array = []
-	for c in hand1.cards:
-		p1_hand_ids.append(c.card_data.card_id)
-	for c in hand2.cards:
-		p2_hand_ids.append(c.card_data.card_id)
-	
-	return {
-		"p1_hp": player1.hp, "p1_block": player1.block, "p1_energy": player1.energy,
-		"p1_chan": player1.chan, "p1_jianyi": player1.jianyi,
-		"p1_next_discount": player1.next_card_discount,
-		"p1_hand_ids": p1_hand_ids,
-		"p2_hp": player2.hp, "p2_block": player2.block, "p2_energy": player2.energy,
-		"p2_chan": player2.chan, "p2_jianyi": player2.jianyi,
-		"p2_next_discount": player2.next_card_discount,
-		"p2_hand_ids": p2_hand_ids,
-		"enemy_hp": enemy.hp, "enemy_block": enemy.block,
-		"draw_pile": draw_pile.duplicate(),
-		"discard_pile": discard_pile.duplicate(),
-		"draw_pile_p2": draw_pile_p2.duplicate() if draw_pile_p2 else [],
-		"discard_pile_p2": discard_pile_p2.duplicate() if discard_pile_p2 else [],
-		"next_two_cards_discount": next_two_cards_discount,
-		"consecutive_discount_used": consecutive_discount_used,
-		"skill_played_this_turn": skill_played_this_turn,
-		"energy_used_this_turn": energy_used_this_turn,
-		"last_played_card_type": last_played_card_type,
-		"last_played_card_id": last_played_card_id,
+		"punch_damage": GameData.get_punch_damage(),
+		"meditate_gain": GameData.get_meditate_gain(),
 	}
 
 
-func _rollback_battle_state(snap: Dictionary):
-	# 恢复玩家状态
-	player1.hp = snap["p1_hp"]; player1.block = snap["p1_block"]
-	player1.energy = snap["p1_energy"]; player1.chan = snap["p1_chan"]
-	player1.jianyi = snap["p1_jianyi"]; player1.next_card_discount = snap["p1_next_discount"]
-	player1.hp_changed.emit(player1.hp, player1.max_hp)
-	player1.energy_changed.emit(player1.energy, player1.max_energy)
-	player1.block_changed.emit(player1.block)
-	
-	player2.hp = snap["p2_hp"]; player2.block = snap["p2_block"]
-	player2.energy = snap["p2_energy"]; player2.chan = snap["p2_chan"]
-	player2.jianyi = snap["p2_jianyi"]; player2.next_card_discount = snap["p2_next_discount"]
-	
-	# 恢复敌人状态
-	enemy.hp = snap["enemy_hp"]; enemy.block = snap["enemy_block"]
-	enemy.hp_changed.emit(enemy.hp, enemy.max_hp)
-	enemy.block_changed.emit(enemy.block)
-	
-	# 恢复牌堆
-	draw_pile = snap["draw_pile"].duplicate()
-	discard_pile = snap["discard_pile"].duplicate()
-	draw_pile_p2 = snap["draw_pile_p2"].duplicate()
-	discard_pile_p2 = snap["discard_pile_p2"].duplicate()
-	
-	# 恢复追踪变量
-	next_two_cards_discount = snap["next_two_cards_discount"]
-	consecutive_discount_used = snap["consecutive_discount_used"]
-	skill_played_this_turn = snap["skill_played_this_turn"]
-	energy_used_this_turn = snap["energy_used_this_turn"]
-	last_played_card_type = snap["last_played_card_type"]
-	last_played_card_id = snap["last_played_card_id"]
-	
-	# 恢复手牌（增量回滚：多了的删掉，少了的加回来）
-	_rollback_hand(hand1, snap["p1_hand_ids"])
-	_rollback_hand(hand2, snap["p2_hand_ids"])
-	
-	_update_ui()
-	_update_deck_ui()
-	_update_sect_ui()
-	print("[Lua事务] 已回滚到出牌前状态")
+func _merge_card_fields(ctx: Dictionary, data: CardData) -> void:
+	ctx["card_id"] = data.card_id
+	ctx["cost"] = data.cost
+	ctx["card_type"] = data.card_type
+	ctx["damage"] = data.damage
+	ctx["block"] = data.block
+	ctx["heal"] = data.heal
+	ctx["draw"] = data.draw
+	ctx["repeat"] = data.repeat
+	ctx["armor_break"] = data.armor_break
+	ctx["school"] = data.school
 
 
-func _rollback_hand(hand_node, target_ids: Array):
-	# 移除快照后新增的卡牌
-	var to_remove: Array = []
-	var current_ids: Array = []
-	for c in hand_node.cards:
-		current_ids.append(c.card_data.card_id)
-	
-	# 找出多余的卡（Lua 通过 gd_add_card_to_hand 加的）
-	for i in range(current_ids.size()):
-		if not target_ids.has(current_ids[i]):
-			to_remove.append(hand_node.cards[i])
-	for c in to_remove:
-		hand_node.remove_card(c)
-		CardPool.release(c)
-	
-	# 补回被 Lua 删掉的卡
-	for cid in target_ids:
-		var found = false
-		for c in hand_node.cards:
-			if c.card_data.card_id == cid:
-				found = true
-				break
-		if not found:
-			var path = "res://resources/cards/%s.tres" % cid
-			var data = load(path)
-			if data:
-				var card_scene = load("res://scenes/card.tscn")
-				var card = CardPool.acquire(card_scene)
-				card.setup(data)
-				hand_node.add_card(card)
+func _make_executor(pid: int, dp: Array = [], dc: Array = []) -> CardExecutor:
+	if dp.is_empty():
+		dp = _draw_pile_of(pid)
+	if dc.is_empty():
+		dc = _discard_pile_of(pid)
+	return CardExecutor.new(_player_node(pid), enemy, _hand_node(pid), dp, dc, _track[pid], card_scene)
 
 
-# ====================================================================
-# 效果系统（NEW）
-# 替代旧版 _execute_card 的 match 分支
-# 卡牌如有 effects 数组则走此路径，否则回退旧路径
-# ====================================================================
+# ==============================
+# 门派 POWER 回合触发（每玩家独立）
+# ==============================
 
-func _execute_card_via_effects(card_node, data: CardData):
-	var dp = draw_pile_p2 if _active_player == 2 else draw_pile
-	var dc = discard_pile_p2 if _active_player == 2 else discard_pile
-	
-	# 构建效果执行上下文
-	var ctx = EffectContext.new()
-	ctx.player = player
-	ctx.enemy = enemy
-	ctx.hand = hand
-	ctx.draw_pile = dp
-	ctx.discard_pile = dc
-	ctx.card_data = data
-	ctx.last_played_card_id = last_played_card_id
-	ctx.last_played_card_type = last_played_card_type
-	ctx.skill_played_this_turn = skill_played_this_turn
-	ctx.energy_used_this_turn = energy_used_this_turn
-	ctx.next_card_discount = player.next_card_discount
-	
-	# 遍历并执行每个效果
-	for effect in data.effects:
-		if effect is ScriptedEffect:
-			# 复杂效果：分派到旧版逻辑
-			_handle_scripted_effect(effect.script_id, ctx, card_node)
-		else:
-			effect.execute(ctx)
-		
-		# 需要等待玩家选择（如小无相功/袖里乾坤）
-		# 后续操作由回调继续
-		if ctx.wait_for_reply:
-			# 标记等待中，卡牌不丢弃，等回调完成
-			return
-	
-	# 应用效果结果
-	_apply_effect_results(card_node, data, ctx)
+func _trigger_power_effects(p: Player, pid: int):
+	if LuaRuntime and LuaRuntime.enabled:
+		var ctx := {
+			"powers": {
+				"damo": p.power_damo,
+				"twoway": p.power_twoway,
+				"bahuang": p.power_bahuang,
+				"longxiang": p.power_longxiang,
+				"xiaoyaoyou": p.power_xiaoyaoyou,
+			},
+		}
+		var result := LuaRuntime.battle_trigger_powers(ctx)
+		var ex := _make_executor(pid)
+		ex.apply_power_trigger(result)
+		return
+
+	# Lua 不可用：GDScript 兜底
+	if p.power_damo:
+		p.chan += 2
+		p.add_block(3)
+		print("达摩一苇：禅意+2，格挡+3")
+	if p.power_bahuang:
+		p.heal(3)
+		var ex := _make_executor(pid)
+		ex.apply_power_trigger({"bahuang_card": true})
+	if p.power_xiaoyaoyou:
+		p.hand_limit_mod = 2
+		p.attack_discounted = true
+		print("逍遥游：手牌上限+2，攻击/内力牌费用-1")
 
 
-func _handle_scripted_effect(script_id: String, ctx: EffectContext, card_node):
-	# 效果系统兜底：复杂的独特卡牌效果
-	# 这些效果因为涉及复杂操作（选牌、复制等），暂时无法数据驱动
-	match script_id:
-		"xy_lingbo":
-			player.next_card_discount = 1
-			print("凌波微步 下张牌费用-1")
-		
-		"xy_wuxiang":
-			ctx.is_consumed = true
-			var copied_id = ""
-			var reversed = ctx.discard_pile.duplicate()
-			reversed.reverse()
-			for cid in reversed:
-				if cid not in ["sl_damo","wd_twoway","xy_bahuang","xy_wuxiang"]:
-					copied_id = cid
-					break
-			if copied_id != "":
-				var cpath = "res://resources/cards/%s.tres" % copied_id
-				var cdata = load(cpath)
-				var cscene = load("res://scenes/card.tscn")
-				var new_card = CardPool.acquire(cscene)
-				new_card.setup(cdata)
-				hand.add_card(new_card)
-				print("小无相功 复制 -> %s" % copied_id)
-			else:
-				print("小无相功 弃牌堆无牌可复制")
-		
-		"xy_jinghua":
-			if ctx.last_played_card_id != "" and ctx.last_played_card_id != "xy_jinghua":
-				var last_path = "res://resources/cards/%s.tres" % ctx.last_played_card_id
-				var last_data = load(last_path)
-				if last_data and last_data.card_type != CardData.CardType.POWER:
-					var cscene = load("res://scenes/card.tscn")
-					var new_card = CardPool.acquire(cscene)
-					new_card.setup(last_data)
-					hand.add_card(new_card)
-					print("镜花水月 复制 -> %s" % ctx.last_played_card_id)
-				else:
-					print("镜花水月 上一张是POWER/无效，跳过")
-			else:
-				print("镜花水月 无上一张牌，跳过")
-		
-		"xy_xiuli":
-			var to_move = null
-			for c in hand.cards:
-				if c != card_node:
-					to_move = c
-					break
-			if to_move != null:
-				var dp = ctx.draw_pile
-				dp.append(to_move.card_data.card_id)
-				var is_attack = to_move.card_data.card_type == CardData.CardType.ATTACK
-				hand.remove_card(to_move)
-				CardPool.release(to_move)
-				if is_attack:
-					ctx.total_draw += 1
-					print("袖里乾坤 移走攻击牌 → 抽1")
-		
-		"xy_duanliu":
-			var to_discard = null
-			for c in hand.cards:
-				if c != card_node:
-					to_discard = c
-					break
-			if to_discard != null:
-				ctx.total_damage += 3
-				var dc = ctx.discard_pile
-				dc.append(to_discard.card_data.card_id)
-				hand.remove_card(to_discard)
-				CardPool.release(to_discard)
-				print("断水流 弃牌→伤害+3")
-		
-		"xy_wanxiang":
-			var hand_size = hand.cards.size()
-			ctx.total_damage = hand_size * 3
-			print("万象归一 手牌%d张 → 伤害%d" % [hand_size, ctx.total_damage])
-			var dc = ctx.discard_pile
-			for c in hand.cards.duplicate():
-				if c != card_node:
-					dc.append(c.card_data.card_id)
-					hand.remove_card(c)
-					CardPool.release(c)
-		
-		"xy_xushi":
-			next_two_cards_discount = 2
-			if consecutive_discount_used:
-				next_two_cards_discount = 3
-				print("虚实相生 连续技能 → 下3减")
-			else:
-				print("虚实相生 下2减")
-		
-		"xy_qiguan":
-			if player.energy >= 2:
-				player.energy -= 2
-				energy_used_this_turn += 2
-				player.energy_changed.emit(player.energy, player.max_energy)
-				ctx.total_damage += 6
-				print("气贯长虹 额外+2内力 → 伤害%d" % (6))
-		
-		"xy_xixing":
-			if enemy.block > 0:
-				ctx.total_damage += 5
-				var healamount = ctx.total_damage
-				# 回血要在 apply 阶段处理
-				ctx.total_heal += healamount
-				print("吸星大法 敌有护盾 → 伤害+5, 回血%d" % healamount)
-		
-		"xy_yibizhi":
-			ctx.total_block = enemy.intent_value
-			print("以彼之道 复制%d点格挡" % ctx.total_block)
-		
-		_:
-			push_warning("ScriptedEffect: unhandled script_id '%s'" % script_id)
-
-
-func _apply_effect_results(card_node, data: CardData, ctx: EffectContext):
-	# ===== 执行伤害 =====
-	if ctx.total_damage > 0 or ctx.total_armor_break > 0:
-		enemy.take_damage(ctx.total_damage, ctx.total_armor_break)
-	
-	# ===== 执行格挡 =====
-	if ctx.total_block > 0:
-		player.add_block(ctx.total_block)
-	
-	# ===== 执行回血 =====
-	if ctx.total_heal > 0:
-		player.heal(ctx.total_heal)
-	
-	# ===== 执行抽牌 =====
-	if ctx.total_draw > 0:
-		_switch_draw(hand, ctx.draw_pile, ctx.discard_pile, ctx.total_draw)
-	
-	# ===== 执行内力 =====
-	if ctx.total_energy > 0:
-		player.gain_energy(ctx.total_energy)
-	elif ctx.total_energy < 0:
-		# 消耗内力（气贯长虹等已在 scripted 里处理了）
-		var spend = -ctx.total_energy
-		player.energy = max(0, player.energy - spend)
-		energy_used_this_turn += spend
-		player.energy_changed.emit(player.energy, player.max_energy)
-	
-	# ===== 弃牌/消耗 =====
-	if not ctx.is_consumed:
-		ctx.discard_pile.append(card_node.card_data.card_id)
-	
-	hand.remove_card(card_node)
-	CardPool.release(card_node)
-	_update_deck_ui()
-	_update_sect_ui()
-	
-	if enemy.hp <= 0:
-		_on_battle_end(true)
-
+# ==============================
+# 结束回合
+# ==============================
 
 func _on_end_turn():
+	# LAN 客机：turn_manager 为空也必须能结束回合
+	# （旧 bug：判空 return 导致客机永远发不出 request_end_turn，联机卡死）
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		NetworkManager.rpc_id(1, "request_end_turn", 2)
+		return
+
 	if game_over or not turn_manager or turn_manager.current_turn == TurnManager.Turn.ENEMY:
 		return
-	
-	# 双人同屏：标记当前玩家结束，双方都结束才进敌人回合
-	if GameData.is_dual_mode and not NetworkManager.is_lan:
-		var ender = _active_player
-		print("[结束回合] P%d 结束, p1_ended=%s p2_ended=%s" % [ender, turn_manager.p1_ended, turn_manager.p2_ended])
-		
-		if ender == 1:
-			turn_manager.p1_ended = true
-		else:
-			turn_manager.p2_ended = true
-		
+
+	# 共享回合（同屏双人 / 联机主机）
+	if _is_dual():
+		var ender := _active_player
+		# 先弃该玩家的手牌，再标记结束
 		_do_end_turn_for(ender)
 		_update_deck_ui()
-		
-		print("[结束回合] 更新后 p1_ended=%s p2_ended=%s" % [turn_manager.p1_ended, turn_manager.p2_ended])
-		
-		if turn_manager.p1_ended and turn_manager.p2_ended:
-			print("[结束回合] 双方都结束，进敌人回合")
-			turn_manager.end_player_turn()
-		else:
-			# 自动切换到未结束的玩家
-			if ender == 1 and not turn_manager.p2_ended:
-				_switch_to(2)
-			elif ender == 2 and not turn_manager.p1_ended:
-				_switch_to(1)
+
+		var advanced := turn_manager.mark_player_ended(ender)
+		if not advanced:
+			# 自动切换到还没结束的玩家
+			var next_p := turn_manager.first_unended_player()
+			if next_p != 0:
+				_switch_to(next_p)
 			else:
 				_update_active_indicator()
-		return
-	
-	# LAN 模式：共享回合，双方各自结束
-	if NetworkManager.is_lan:
-		if NetworkManager.is_host:
-			# 主机：P1 结束
-			turn_manager.p1_ended = true
-			_do_end_turn_for(1)
-			if turn_manager.p1_ended and turn_manager.p2_ended:
-				turn_manager.end_player_turn()
+		if NetworkManager.is_lan and NetworkManager.is_host:
 			NetworkManager.push_snapshot()
-		else:
-			# 客机：P2 请求结束
-			NetworkManager.rpc_id(1, "request_end_turn", 2)
 		return
-	
+
 	_do_end_turn()
 
 
+## 单人模式：弃手牌并推进回合
 func _do_end_turn():
-	"""纯结束回合逻辑（不含网络路由）"""
 	if hand.selected_card != null:
 		hand.deselect()
-	
-	var my_discard = discard_pile_p2 if _active_player == 2 else discard_pile
+	var my_discard: Array = discard_pile
 	for c in hand.cards.duplicate():
 		if c.card_data.retain:
 			continue
 		my_discard.append(c.card_data.card_id)
 		hand.remove_card(c)
 		CardPool.release(c)
-	
 	turn_manager.end_player_turn()
 
 
+## 弃指定玩家手牌（不切换回合）
 func _do_end_turn_for(player_id: int):
-	"""弃指定玩家手牌（不切换回合）"""
-	var target_hand = hand1 if player_id == 1 else hand2
-	var target_discard = discard_pile if player_id == 1 else discard_pile_p2
-	
+	var target_hand := _hand_node(player_id)
+	var target_discard := _discard_pile_of(player_id)
+
 	if target_hand.selected_card != null:
 		target_hand.deselect()
-	
+
 	for c in target_hand.cards.duplicate():
 		if c.card_data.retain:
 			continue
@@ -1361,60 +776,48 @@ func _do_end_turn_for(player_id: int):
 
 
 # ==============================
-# 局域网 RPC 回调
-# NetworkManager 的 sync_play / sync_end_turn 调用这里
+# 局域网 RPC 回调（主机执行）
 # ==============================
 
 func network_execute_play(card_id: String, player_id: int):
-	"""RPC回调：客机请求P2出牌（仅主机执行）"""
+	"""客机请求P2出牌（仅主机执行）"""
 	if not NetworkManager.is_host:
 		return
-	var target_hand = hand1 if player_id == 1 else hand2
-	var target_player = player1 if player_id == 1 else player2
-	var saved_hand = hand
-	var saved_player = player
-	var saved_active = _active_player
-	
-	hand = target_hand
-	player = target_player
-	_active_player = player_id
-	
-	for c in hand.cards:
-		if c.card_data.card_id == card_id:
-			_execute_card(c)
-			break
-	
-	hand = saved_hand
-	player = saved_player
-	_active_player = saved_active
+	_with_player(player_id, func():
+		for c in hand.cards:
+			if c.card_data.card_id == card_id:
+				_execute_card(c)
+				break
+	)
 
 
 func network_execute_end_turn(player_id: int):
-	"""RPC回调：客机请求P2结束回合（仅主机执行）"""
+	"""客机请求P2结束回合（仅主机执行）"""
 	if not NetworkManager.is_host:
 		return
-	turn_manager.p2_ended = true
-	_do_end_turn_for(2)
-	if turn_manager.p1_ended and turn_manager.p2_ended:
-		turn_manager.end_player_turn()
+	_do_end_turn_for(player_id)
+	turn_manager.mark_player_ended(player_id)
+	_update_deck_ui()
 	NetworkManager.push_snapshot()
 
 
 # ==============================
-# 🆕 状态快照同步（客机）
+# 状态快照同步（客机渲染）
 # ==============================
 
-var _waiting_mask: ColorRect = null
-
-
 func apply_snapshot(snap: Dictionary):
+	# 全局进度（客机预览/界面显示需要与主机一致的境界、金币）
+	GameData.current_realm = snap.get("realm", GameData.current_realm)
+	GameData.max_energy_per_realm = snap.get("max_energy_per_realm", GameData.max_energy_per_realm)
+	GameData.gold = snap.get("gold", GameData.gold)
+	GameData.cultivation = snap.get("cultivation", GameData.cultivation)
+
 	# 同步结束状态（客机可能没有 turn_manager）
 	var p1_ended = snap.get("p1_ended", false)
 	var p2_ended = snap.get("p2_ended", false)
-	if turn_manager:
-		turn_manager.p1_ended = p1_ended
-		turn_manager.p2_ended = p2_ended
-	
+	if turn_manager and is_instance_valid(turn_manager):
+		turn_manager.apply_network_end_state(p1_ended, p2_ended)
+
 	# 回合显示
 	var turn_val = snap.get("turn", -1)
 	match turn_val:
@@ -1425,46 +828,53 @@ func apply_snapshot(snap: Dictionary):
 				turn_label.text = "等待P1结束回合..."
 			else:
 				turn_label.text = "玩家回合"
+			end_turn_btn.disabled = false
 		TurnManager.Turn.ENEMY:
 			turn_label.text = "敌人回合"
 			end_turn_btn.disabled = true
-	_active_player = snap["active_player"]
-	_switch_to(snap["active_player"])
-	
+
+	_switch_to(snap.get("active_player", 1))
+
 	# 玩家1
-	player1.hp = snap["p1_hp"]
-	player1.max_hp = snap["p1_max_hp"]
-	player1.block = snap["p1_block"]
-	player1.energy = snap["p1_energy"]
-	_diff_hand(hand1, snap["p1_hand_ids"])
-	deck_label.text = "牌库 %d" % snap["p1_draw_count"]
-	discard_label.text = "弃牌 %d" % snap["p1_discard_count"]
-	
+	player1.hp = snap.get("p1_hp", player1.hp)
+	player1.max_hp = snap.get("p1_max_hp", player1.max_hp)
+	player1.block = snap.get("p1_block", 0)
+	player1.energy = snap.get("p1_energy", 0)
+	player1.chan = snap.get("p1_chan", 0)
+	player1.jianyi = snap.get("p1_jianyi", 0)
+	_diff_hand(hand1, snap.get("p1_hand_ids", []))
+	deck_label.text = "牌库 %d" % snap.get("p1_draw_count", 0)
+	discard_label.text = "弃牌 %d" % snap.get("p1_discard_count", 0)
+
 	# 玩家2
-	if snap["is_dual"] and player2:
-		player2.hp = snap["p2_hp"]
-		player2.max_hp = snap["p2_max_hp"]
-		player2.block = snap["p2_block"]
-		player2.energy = snap["p2_energy"]
-		_diff_hand(hand2, snap["p2_hand_ids"])
-	
+	if snap.get("is_dual", false) and player2:
+		player2.hp = snap.get("p2_hp", player2.hp)
+		player2.max_hp = snap.get("p2_max_hp", player2.max_hp)
+		player2.block = snap.get("p2_block", 0)
+		player2.energy = snap.get("p2_energy", 0)
+		player2.chan = snap.get("p2_chan", 0)
+		player2.jianyi = snap.get("p2_jianyi", 0)
+		_diff_hand(hand2, snap.get("p2_hand_ids", []))
+
 	# 敌人
-	var e = get_node_or_null("Enemy")
-	if e and snap["enemy_exists"]:
-		e.hp = snap["enemy_hp"]; e.max_hp = snap["enemy_max_hp"]
-		e.block = snap["enemy_block"]
-		e.intent_type = snap["enemy_intent_type"]; e.intent_value = snap["enemy_intent_val"]
-		e.intent_changed.emit(e.intent_type, e.intent_value)
-	
+	if enemy and snap.get("enemy_exists", false):
+		enemy.hp = snap.get("enemy_hp", enemy.hp)
+		enemy.max_hp = snap.get("enemy_max_hp", enemy.max_hp)
+		enemy.block = snap.get("enemy_block", 0)
+		enemy.intent_type = snap.get("enemy_intent_type", 0)
+		enemy.intent_value = snap.get("enemy_intent_val", 0)
+		enemy.intent_changed.emit(enemy.intent_type, enemy.intent_value)
+
 	# 敌人头像同步
 	var tex_path = snap.get("enemy_portrait_path", "")
 	if tex_path != "":
 		enemy_portrait.texture = load(tex_path)
-	
-	# 全局
-	game_over = snap["game_over"]
+
+	game_over = snap.get("game_over", false)
+	if game_over:
+		retry_btn.visible = snap.get("show_retry", false)
 	_update_ui()
-	# 遮罩由 _switch_to 管理
+	_refresh_card_previews()
 
 
 func _diff_hand(hand_node, target_ids: Array):
@@ -1472,15 +882,16 @@ func _diff_hand(hand_node, target_ids: Array):
 	var current_ids = []
 	for c in hand_node.cards:
 		current_ids.append(c.card_data.card_id)
-	
-	# 移除多余的
+
+	# 移除多余的（必须回池，修复客机节点泄漏）
 	var to_remove = []
 	for i in range(current_ids.size()):
 		if current_ids[i] not in target_ids:
 			to_remove.append(hand_node.cards[i])
 	for card in to_remove:
 		hand_node.remove_card(card)
-	
+		CardPool.release(card)
+
 	# 添加缺少的
 	for cid in target_ids:
 		var found = false
@@ -1489,10 +900,8 @@ func _diff_hand(hand_node, target_ids: Array):
 				found = true
 				break
 		if not found:
-			var path = "res://resources/cards/%s.tres" % cid
-			var data = load(path)
+			var data = load("res://resources/cards/%s.tres" % cid)
 			if data:
-				var card_scene = load("res://scenes/card.tscn")
 				var card = CardPool.acquire(card_scene)
 				card.setup(data)
 				hand_node.add_card(card)
@@ -1518,6 +927,7 @@ func _show_waiting_mask(text: String):
 	_waiting_mask.add_child(label)
 	add_child(_waiting_mask)
 
+
 func _hide_waiting_mask():
 	if _waiting_mask:
 		_waiting_mask.queue_free()
@@ -1525,50 +935,7 @@ func _hide_waiting_mask():
 
 
 # ==============================
-# 门派POWER回合触发
-# ==============================
-
-func _trigger_power_effects():
-	if LuaRuntime and LuaRuntime.enabled:
-		var ctx = {
-			"turn": turn_manager.current_turn if turn_manager else 0,
-			"is_player_turn": true,
-		}
-		LuaRuntime.battle_trigger_powers(ctx)
-		return
-	
-	# 回退：旧版 GDScript 逻辑
-	player.first_hit_this_turn = true
-	
-	if player.power_damo:
-		player.chan += 2
-		player.add_block(3)
-		print("达摩一苇：禅意+2，格挡+3")
-	
-	if player.power_bahuang:
-		player.heal(3)
-		var base_pool = ["strike", "defend", "punch", "meditate"]
-		base_pool.shuffle()
-		var card_id = base_pool[0]
-		var path = "res://resources/cards/%s.tres" % card_id
-		var data = load(path)
-		var card_scene = load("res://scenes/card.tscn")
-		var card = CardPool.acquire(card_scene)
-		card.setup(data)
-		if hand.add_card(card):
-			print("八荒六合：回复3HP，获得 %s" % card_id)
-		else:
-			CardPool.release(card)
-			discard_pile.append(card_id)
-	
-	if player.power_xiaoyaoyou:
-		player.hand_limit_mod = 2
-		player.attack_discounted = true
-		print("逍遥游：手牌上限+2，攻击/内力牌费用-1")
-
-
-# ==============================
-# 战斗结束
+# 战斗结束 / 奖励
 # ==============================
 
 func _on_battle_end(won):
@@ -1576,101 +943,100 @@ func _on_battle_end(won):
 		return
 	game_over = true
 	end_turn_btn.disabled = true
-	
-	if won:
-		_update_turn_label("胜利！")
-		GameData.add_cultivation(10)
-		GameData.add_gold(12)
-		
-		# 局域网：主机给客机也加奖励，然后双方都显示地图
-		if NetworkManager.is_lan:
-			if NetworkManager.is_host:
-				# 主机选奖励
-				var pool = _get_reward_pool()
-				pool.shuffle()
-				var options = pool.slice(0, 3)
-				reward_screen.open(options)
-				# 通知客机也开奖励界面
-				NetworkManager.rpc("sync_reward_open", options)
-			return
-		
-		# 同屏/单机：正常开奖励界面
-		var pool = _get_reward_pool()
-		pool.shuffle()
-		var options = pool.slice(0, 3)
-		reward_screen.open(options)
-	else:
+
+	if not won:
 		_update_turn_label("败北...")
 		retry_btn.visible = true
+		if NetworkManager.is_lan and NetworkManager.is_host:
+			NetworkManager.push_snapshot()
+		return
 
+	_update_turn_label("胜利！")
+	# 奖励随楼层类型缩放（与地图提示一致：普通10/12 精英20/20 Boss40/50）
+	var reward: Dictionary = GameData.get_battle_reward()
+	GameData.add_cultivation(reward["cultivation"])
+	GameData.add_gold(reward["gold"])
 
-func _on_player_died():
-	_on_battle_end(false)
+	var options := _roll_reward_options()
 
-
-func _on_enemy_died_by_signal():
-	if not game_over:
-		_on_battle_end(true)
-
-
-func _on_retry():
-	game_over = false
-	end_turn_btn.disabled = false
-	retry_btn.visible = false
-	player.init()
-	_start_battle()
-	# 重置牌组
-	draw_pile = GameData.player_deck.duplicate()
-	draw_pile.shuffle()
-	discard_pile.clear()
-	if GameData.is_dual_mode:
-		draw_pile_p2 = GameData.player2_deck.duplicate()
-		draw_pile_p2.shuffle()
-		discard_pile_p2.clear()
-		hand1.clear()
-		hand2.clear()
-	else:
-		hand.clear()
-	
-	# 重启回合管理器（自动触发 P1 抽牌）
-	turn_manager.start_battle(GameData.is_dual_mode)
-
-
-func _on_back_to_menu():
 	if NetworkManager.is_lan:
-		NetworkManager.cleanup()
-	get_tree().change_scene_to_file("res://scenes/start_screen.tscn")
+		if NetworkManager.is_host:
+			_p1_reward_done = false
+			_p2_reward_done = false
+			reward_screen.open(options)
+			NetworkManager.rpc("sync_reward_open", options)
+		return
+
+	# 同屏双人：P1 先选，选完轮到 P2
+	if _is_dual():
+		_reward_picker = 1
+	reward_screen.open(options)
 
 
-# ==============================
-# 战斗奖励 → 地图节点
-# ==============================
+func _roll_reward_options() -> Array:
+	# 奖励池 = 通用 + 本队门派（不再把别派卡塞给玩家）
+	var extra: Array = []
+	if _is_dual():
+		var s2: String = GameData.character_data.get(GameData.selected_character_2, {}).get("school", "")
+		if s2 != "":
+			extra.append(s2)
+	var pool := GameData.get_character_pool("", extra)
+	pool.shuffle()
+	return pool.slice(0, 3)
+
 
 func _on_reward_chosen(card_id: String):
 	GameData.add_card(card_id)
 	print("选择了奖励卡牌: %s" % card_id)
 	GameData.save_game()
-	if NetworkManager.is_lan:
-		if NetworkManager.is_host:
-			_show_map()
-			NetworkManager.rpc("sync_show_map")
-		else:
-			NetworkManager.rpc_id(1, "request_reward_done", card_id)
-	else:
-		_show_map()
+
+	if NetworkManager.is_lan and NetworkManager.is_host:
+		_p1_reward_done = true
+		_try_finish_lan_rewards()
+		return
+
+	# 同屏双人：P1 选完轮到 P2 选
+	if _is_dual() and _reward_picker == 1:
+		_reward_picker = 2
+		reward_screen.open(_roll_reward_options(), "玩家2选择奖励")
+		return
+
+	_show_map()
 
 
 func _on_reward_skipped():
 	print("跳过了奖励")
 	GameData.save_game()
-	if NetworkManager.is_lan:
-		if NetworkManager.is_host:
-			_show_map()
-			NetworkManager.rpc("sync_show_map")
-		else:
-			NetworkManager.rpc_id(1, "request_reward_done", "")
-	else:
+
+	if NetworkManager.is_lan and NetworkManager.is_host:
+		_p1_reward_done = true
+		_try_finish_lan_rewards()
+		return
+
+	if _is_dual() and _reward_picker == 1:
+		_reward_picker = 2
+		reward_screen.open(_roll_reward_options(), "玩家2选择奖励")
+		return
+
+	_show_map()
+
+
+## 主机收到客机的奖励选择 → 加进 P2 牌组
+func network_reward_done(card_id: String):
+	if not NetworkManager.is_host or _node_result_done:
+		return
+	if card_id != "":
+		GameData.add_card_to_player2(card_id)
+		print("P2 选择了奖励卡牌: %s" % card_id)
+	GameData.save_game()
+	_p2_reward_done = true
+	_try_finish_lan_rewards()
+
+
+func _try_finish_lan_rewards():
+	if _p1_reward_done and _p2_reward_done:
 		_show_map()
+		NetworkManager.rpc("sync_show_map")
 
 
 # 客机收到：开奖励界面
@@ -1680,96 +1046,7 @@ func network_reward_open(options: Array):
 
 # 客机收到：显示地图
 func network_show_map():
-	_hide_waiting_mask()
 	_show_map()
-
-
-# 主机收到客机的奖励选择结果
-func network_reward_done(card_id: String):
-	if card_id != "":
-		GameData.add_card(card_id)
-	GameData.save_game()
-	_show_map()
-	NetworkManager.rpc("sync_show_map")
-
-
-# 主机收到客机的休息点选择
-func network_rest_done(next_action: String):
-	match next_action:
-		"heal":
-			GameData.heal_player(0.3)
-		"cultivate":
-			GameData.add_cultivation(10)
-			GameData.add_gold(10)
-	GameData.save_game()
-	_show_map()
-	NetworkManager.rpc("sync_show_map")
-
-
-# 主机收到客机的事件选择
-func network_event_done(_event_id: String, action: String):
-	# 主机端也执行一次事件效果（客机的选择）
-	_apply_event_action(action)
-	GameData.save_game()
-	_show_map()
-	NetworkManager.rpc("sync_show_map")
-
-
-# 主机收到客机的商店完成
-func network_shop_done():
-	GameData.save_game()
-	_show_map()
-	NetworkManager.rpc("sync_show_map")
-
-
-func _apply_event_action(action: String):
-	match action:
-		"buy_discount":
-			if GameData.gold >= 5:
-				GameData.spend_gold(5)
-				var card_id = GameData.get_random_new_card()
-				GameData.add_card(card_id)
-		"help":
-			GameData.player_hp = maxi(1, GameData.player_hp - 5)
-			var card_id = GameData.get_random_new_card()
-			GameData.add_card(card_id)
-		"open":
-			GameData.add_gold(20)
-			GameData.add_cultivation(5)
-		"heal":
-			GameData.player_hp = mini(GameData.player_max_hp, GameData.player_hp + 15)
-		"cultivate":
-			GameData.add_cultivation(15)
-		"skip":
-			pass
-
-
-func _get_reward_pool() -> Array:
-	return [
-		"punch", "meditate", "light_step",
-		"double_strike", "tactics", "iron_wall", "vigor", "whirlwind",
-		"flowing_cloud_sword", "triple_stab", "sword_energy",
-		"iron_shirt", "vajra_fist", "golden_bell",
-		"strike", "defend", "bash", "heal",
-		"sl_fist", "sl_iron", "sl_golden", "sl_arhat",
-		"wd_taiji", "wd_soft", "wd_steps", "wd_heavy",
-		"xy_beiming", "xy_lingbo", "xy_wuxiang", "xy_zhemel",
-		"xy_xiaoyaoyou", "xy_xingluo", "xy_fengjuan",
-		"xy_guicang", "xy_fuguang", "xy_yufeng",
-		"xy_duanliu", "xy_wanxiang", "xy_xiuli",
-		"xy_lianhuan", "xy_houfa", "xy_jinghua",
-		"xy_wujian", "xy_xushi", "xy_yixing",
-		"xy_hantan", "xy_qiguan", "xy_tuna",
-		"xy_longxiang", "xy_baoyuan", "xy_xixing",
-		"xy_guanxing", "xy_fange", "xy_yibizhi", "xy_duotian"
-	]
-
-
-func _show_map():
-	# 显示杀戮尖塔风格地图
-	if GameData.is_map_complete():
-		GameData.generate_new_act()
-	node_map.open()
 
 
 # ==============================
@@ -1779,47 +1056,32 @@ func _show_map():
 func _on_node_selected(node_type: int):
 	if NetworkManager.is_lan:
 		if NetworkManager.is_host:
-			# 主机：直接执行 + 广播给客机
 			_do_select_node(node_type)
 			NetworkManager.rpc("sync_select_node", node_type)
-			# 战斗节点：场景重载后 _ready 会重新初始化，延迟推快照
 			if node_type == GameData.NodeType.BATTLE_NORMAL or node_type == GameData.NodeType.BATTLE_ELITE:
-				# 等场景重载完成后再推快照
+				# 战斗节点：等场景重置完成后再推快照
 				await get_tree().create_timer(1.0).timeout
 			NetworkManager.push_snapshot()
 		else:
-			# 客机：请求主机执行
 			NetworkManager.rpc_id(1, "request_select_node", node_type)
 		return
-	
+
 	_do_select_node(node_type)
 
 
 func network_select_node(node_type: int):
-	"""RPC回调：执行节点选择"""
+	"""RPC回调：执行节点选择（客机收主机广播）"""
 	_do_select_node(node_type)
 
 
 func _do_select_node(node_type: int):
+	_node_result_done = false
+
 	match node_type:
 		GameData.NodeType.BATTLE_NORMAL, GameData.NodeType.BATTLE_ELITE:
-			# 推进楼层
-			GameData.advance_floor()
-			# 重置战斗状态
-			game_over = false
-			end_turn_btn.disabled = false
-			player1.init()
-			player2.init(true)
-			hand1.clear()
-			hand2.clear()
-			discard_pile.clear()
-			discard_pile_p2.clear()
-			_start_battle()
-			draw_pile = GameData.player_deck.duplicate()
-			draw_pile.shuffle()
-			if GameData.is_dual_mode:
-				draw_pile_p2 = GameData.player2_deck.duplicate()
-				draw_pile_p2.shuffle()
+			# 楼层已由 GameData.select_map_node 设定（禁止再 advance！）
+			_reset_battle_state()
+
 			# 重启回合管理器（客机不启动，等快照）
 			if turn_manager:
 				turn_manager.queue_free()
@@ -1829,112 +1091,318 @@ func _do_select_node(node_type: int):
 			if not (NetworkManager.is_lan and not NetworkManager.is_host):
 				turn_manager.turn_started.connect(_on_turn_started)
 				turn_manager.turn_changed.connect(_on_turn_started)
-				turn_manager.start_battle(GameData.is_dual_mode)
+				turn_manager.start_battle()
 			_update_ui()
 			_update_deck_ui()
-			# 隐藏地图
 			node_map.visible = false
 			_hide_waiting_mask()
-			# 客机：显示等待遮罩，等主机推快照
 			if NetworkManager.is_lan and not NetworkManager.is_host:
 				_show_waiting_mask("同步战斗状态...")
-		
+
 		GameData.NodeType.SHOP:
 			_open_shop()
-		
+
 		GameData.NodeType.REST:
-			$RestScreen.open()
-		
+			_open_rest()
+
 		GameData.NodeType.EVENT:
-			var event_data = GameData.get_random_event()
-			$EventScreen.open(event_data)
+			_open_event()
 
 
-# 非战斗节点完成 → 进下一层地图
+## 重置战斗状态并初始化本场敌人
+func _reset_battle_state():
+	game_over = false
+	end_turn_btn.disabled = false
+	retry_btn.visible = false
+	player1.init()
+	player2.init(true)
+	hand1.clear()
+	hand2.clear()
+	discard_pile.clear()
+	discard_pile_p2.clear()
+	_reset_turn_track(1)
+	_reset_turn_track(2)
+	_start_battle()
+
+	draw_pile = GameData.player_deck.duplicate()
+	draw_pile.shuffle()
+	if _is_dual():
+		draw_pile_p2 = GameData.player2_deck.duplicate()
+		draw_pile_p2.shuffle()
+
+
+func _start_battle():
+	var ft = GameData.get_floor_type()
+	var ft_names = ["普通", "精英", "Boss"]
+	enemy.init_from_floor(GameData.current_floor, ft)
+
+	# 设置背景图
+	var bg_tex = BIOME_BG.get(GameData.current_biome)
+	if bg_tex:
+		_battle_bg.texture = bg_tex
+
+	# 从当前生态的敌人池里按楼层选一个（两端一致）
+	var pool = BIOME_ENEMIES.get(GameData.current_biome, {})
+	var key = "boss" if ft == GameData.FloorType.BOSS else ("elite" if ft == GameData.FloorType.ELITE else "normal")
+	var candidates = pool.get(key, ["山匪"])
+	if candidates.size() > 0:
+		var idx = GameData.current_floor % candidates.size()
+		var eid = candidates[idx]
+		var tex_path = "res://assets/images/enemies/%s.tres" % eid
+		enemy_portrait.texture = load(tex_path)
+		print("敌人: %s" % eid)
+
+	_update_floor_label()
+	var biome_names = ["竹林", "村庄", "官府", "门派"]
+	var biome_name = biome_names[GameData.current_biome] if GameData.current_biome < biome_names.size() else "?"
+	print("===== 第 %d 层 · %s战 · %s =====" % [GameData.current_floor, ft_names[ft], biome_name])
+
+
+func _update_floor_label():
+	var ft = GameData.get_floor_type()
+	var ft_names = ["战斗", "⚔精英", "♛Boss"]
+	floor_label.text = "第 %d 层 · %s" % [GameData.current_floor, ft_names[ft]]
+
+
+# ==============================
+# 休息 / 事件 / 商店（含联机同步）
+# ==============================
+
+func _open_rest():
+	if NetworkManager.is_lan:
+		if NetworkManager.is_host:
+			rest_screen.open(true)
+			NetworkManager.rpc("sync_rest_open", GameData.player_hp, GameData.player2_hp, GameData.gold)
+		else:
+			_show_waiting_mask("等待主机...")
+	else:
+		rest_screen.open(true)
+
+
+func network_rest_open(p1_hp: int, p2_hp: int, gold: int):
+	"""客机收到：打开休息点（只展示，选择权在主机）"""
+	GameData.player_hp = p1_hp
+	GameData.player2_hp = p2_hp
+	GameData.gold = gold
+	_hide_waiting_mask()
+	rest_screen.open(false)
+
+
 func _on_rest_closed(next_action: String):
+	# 只在「本端发起」时结算（客机的休息界面不可交互）
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		return
+	if _node_result_done:
+		return
+
 	match next_action:
 		"heal":
 			GameData.heal_player(0.3)
-			print("休息点·调息: HP -> %d/%d" % [GameData.player_hp, GameData.player_max_hp])
+			if _is_dual():
+				GameData.heal_player2(0.3)
+			print("休息点·调息: P1 %d/%d" % [GameData.player_hp, GameData.player_max_hp])
 		"cultivate":
 			GameData.add_cultivation(10)
 			GameData.add_gold(10)
 			print("休息点·冥想: 修为+10, 金币+10")
-	
+
 	GameData.save_game()
-	if NetworkManager.is_lan:
-		if NetworkManager.is_host:
-			_show_map()
-			NetworkManager.rpc("sync_show_map")
-		else:
-			NetworkManager.rpc_id(1, "request_rest_done", next_action)
+	_node_result_done = true
+	if NetworkManager.is_lan and NetworkManager.is_host:
+		_show_map()
+		NetworkManager.rpc("sync_show_map")
 	else:
 		_show_map()
 
 
-func _on_event_closed(event_id: String, action: String):
+func network_rest_done(next_action: String):
+	"""旧接口保留：客机的休息选择（现客机不可交互，理论不会触发）"""
+	_on_rest_closed(next_action)
+
+
+func _open_event():
+	if NetworkManager.is_lan:
+		if NetworkManager.is_host:
+			var event_data: Dictionary = GameData.get_random_event()
+			event_screen.open(event_data)
+			NetworkManager.rpc("sync_event_open", event_data)
+		else:
+			_show_waiting_mask("等待主机...")
+	else:
+		event_screen.open(GameData.get_random_event())
+
+
+func network_event_open(event_data: Dictionary):
+	"""客机收到：显示主机的事件（两端内容一致，谁先选谁算）"""
+	_hide_waiting_mask()
+	event_screen.open(event_data)
+
+
+func _apply_event_action(action: String):
 	match action:
 		"buy_discount":
 			if GameData.gold >= 5:
 				GameData.spend_gold(5)
-				var card_id = GameData.get_random_new_card()
-				GameData.add_card(card_id)
-				print("事件: 行脚商人 → 购买 %s" % card_id)
-			else:
-				print("事件: 行脚商人 → 金币不足")
-		
+				GameData.add_card(GameData.get_random_new_card())
 		"help":
 			GameData.player_hp = maxi(1, GameData.player_hp - 5)
-			var card_id = GameData.get_random_new_card()
-			GameData.add_card(card_id)
-			print("事件: 受伤武者 → -5HP, +%s" % card_id)
-		
+			GameData.add_card(GameData.get_random_new_card())
 		"open":
 			GameData.add_gold(20)
 			GameData.add_cultivation(5)
-			print("事件: 神秘宝箱 → 金币+20, 修为+5")
-		
 		"heal":
+			# 双人模式事件治疗全队
 			GameData.heal_player(0.0)
 			GameData.player_hp = mini(GameData.player_max_hp, GameData.player_hp + 15)
-			print("事件: 废弃药园 → HP+15 (%d)" % GameData.player_hp)
-		
+			if _is_dual():
+				GameData.player2_hp = mini(GameData.player2_max_hp, GameData.player2_hp + 15)
 		"cultivate":
 			GameData.add_cultivation(15)
-			print("事件: 修炼洞府 → 修为+15")
-		
 		"skip":
-			print("事件: 跳过了")
-	
+			pass
+
+
+func _on_event_closed(_event_id: String, action: String):
+	if _node_result_done:
+		return
+	_apply_event_action(action)
 	GameData.save_game()
+	_node_result_done = true
 	if NetworkManager.is_lan:
 		if NetworkManager.is_host:
 			_show_map()
 			NetworkManager.rpc("sync_show_map")
 		else:
-			NetworkManager.rpc_id(1, "request_event_done", event_id, action)
+			NetworkManager.rpc_id(1, "request_event_done", _event_id, action)
 	else:
 		_show_map()
 
 
-# ==============================
-# 商店
-# ==============================
+func network_event_done(_event_id: String, action: String):
+	"""主机收到客机的事件选择"""
+	if not NetworkManager.is_host or _node_result_done:
+		return
+	_apply_event_action(action)
+	GameData.save_game()
+	_node_result_done = true
+	_show_map()
+	NetworkManager.rpc("sync_show_map")
+
 
 func _open_shop():
-	shop_screen.open()
+	if NetworkManager.is_lan:
+		if NetworkManager.is_host:
+			shop_screen.open()
+			NetworkManager.rpc("sync_shop_open", shop_screen.stock, shop_screen.sold)
+		else:
+			_show_waiting_mask("等待主机商店数据...")
+	else:
+		shop_screen.open()
+
+
+func network_shop_open(stock: Array, sold: Array):
+	"""客机收到：打开与主机一致的商店"""
+	_hide_waiting_mask()
+	shop_screen.open(stock, sold)
+
+
+func _on_shop_buy_requested(card_id: String, target_player: int):
+	"""客机的购买请求 → 转发主机结算"""
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		NetworkManager.rpc_id(1, "request_shop_buy", card_id, target_player)
+
+
+func _on_shop_delete_requested(card_id: String, target_player: int):
+	"""客机的删牌请求 → 转发主机结算"""
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		NetworkManager.rpc_id(1, "request_shop_delete", card_id, target_player)
+
+
+func network_shop_buy(card_id: String, target_player: int):
+	"""主机收到客机购买：扣钱、加牌组、广播新库存"""
+	if not NetworkManager.is_host or _node_result_done:
+		return
+	if not GameData.spend_gold(shop_screen.BUY_PRICE):
+		return
+	shop_screen.apply_remote_buy(card_id, target_player)
+	NetworkManager.rpc("sync_shop_update", shop_screen.stock, shop_screen.sold, GameData.gold)
+	NetworkManager.push_snapshot()
+
+
+func network_shop_delete(card_id: String, target_player: int):
+	"""主机收到客机删牌：扣钱、删牌、广播"""
+	if not NetworkManager.is_host or _node_result_done:
+		return
+	if not GameData.spend_gold(shop_screen.DELETE_PRICE):
+		return
+	shop_screen.apply_remote_delete(card_id, target_player)
+	NetworkManager.rpc("sync_shop_update", shop_screen.stock, shop_screen.sold, GameData.gold)
+	NetworkManager.push_snapshot()
+
+
+func network_shop_sync(stock: Array, sold: Array, gold: int):
+	"""客机收到：商店库存/金币更新"""
+	GameData.gold = gold
+	shop_screen.refresh_synced(stock, sold)
+
+
+func network_shop_done():
+	"""主机收到客机：逛完商店了"""
+	if not NetworkManager.is_host or _node_result_done:
+		return
+	GameData.save_game()
+	_node_result_done = true
+	_show_map()
+	NetworkManager.rpc("sync_show_map")
 
 
 func _on_shop_done():
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		NetworkManager.rpc_id(1, "request_shop_done")
+		return
+	if _node_result_done:
+		return
 	GameData.save_game()
-	if NetworkManager.is_lan:
-		if NetworkManager.is_host:
-			_show_map()
-			NetworkManager.rpc("sync_show_map")
-		else:
-			NetworkManager.rpc_id(1, "request_shop_done")
+	_node_result_done = true
+	if NetworkManager.is_lan and NetworkManager.is_host:
+		_show_map()
+		NetworkManager.rpc("sync_show_map")
 	else:
 		_show_map()
+
+
+# ==============================
+# 显示地图 / 节点推进
+# ==============================
+
+func _show_map():
+	# 关闭所有可能还开着的弹层（联机下对端可能在等）
+	reward_screen.visible = false
+	shop_screen.visible = false
+	rest_screen.visible = false
+	event_screen.visible = false
+	_hide_waiting_mask()
+	if GameData.is_map_complete():
+		GameData.generate_new_act()
+	node_map.open()
+
+
+# ==============================
+# 重试 / 返回
+# ==============================
+
+func _on_retry():
+	game_over = false
+	retry_btn.visible = false
+	end_turn_btn.disabled = false
+	_reset_battle_state()
+	turn_manager.start_battle()
+
+
+func _on_back_to_menu():
+	if NetworkManager.is_lan:
+		NetworkManager.cleanup()
+	get_tree().change_scene_to_file("res://scenes/start_screen.tscn")
 
 
 # ==============================
@@ -1962,59 +1430,48 @@ func _update_sect_ui():
 	jianyi_icon.visible = player.jianyi > 0
 	_refresh_card_previews()
 
+
 func _update_deck_ui():
-	if GameData.is_dual_mode:
-		var dp = draw_pile_p2 if _active_player == 2 else draw_pile
-		var dc = discard_pile_p2 if _active_player == 2 else discard_pile
+	if _is_dual():
+		var dp = _draw_pile_of(_active_player)
+		var dc = _discard_pile_of(_active_player)
 		deck_label.text = "牌库 %d" % dp.size()
 		discard_label.text = "弃牌 %d" % dc.size()
 	else:
 		deck_label.text = "牌库 %d" % draw_pile.size()
 		discard_label.text = "弃牌 %d" % discard_pile.size()
 
+
 func _on_energy_changed(cur, max_val):
 	energy_label.text = "内力 %d/%d" % [cur, max_val]
 	_refresh_card_previews()
 
+
 func _on_hp_changed(cur, max_val):
 	hp_label.text = "HP %d/%d" % [cur, max_val]
+
 
 func _on_block_changed(cur):
 	block_label.text = "格挡 %d" % cur if cur > 0 else ""
 
-## 刷新所有手牌的预览数值（调用 Lua 计算实际伤害/格挡等）
+
+## 刷新所有手牌的预览数值（每只手用各自玩家的上下文）
 func _refresh_card_previews():
 	if not LuaRuntime or not LuaRuntime.enabled:
 		return
-	if not hand or not player or not enemy:
+	if not card_scene:
 		return
-	var ctx = _build_card_ctx()
-	for c in hand.cards:
-		if is_instance_valid(c):
-			c.update_preview(ctx)
+	if hand1.visible:
+		var ctx1 := _build_state_ctx(1)
+		for c in hand1.cards:
+			if is_instance_valid(c):
+				c.update_preview(ctx1)
+	if hand2.visible:
+		var ctx2 := _build_state_ctx(2)
+		for c in hand2.cards:
+			if is_instance_valid(c):
+				c.update_preview(ctx2)
 
-func _build_card_ctx() -> Dictionary:
-	return {
-		"card_id": "", "cost": 0, "card_type": 0,
-		"damage": 0, "block": 0, "heal": 0, "draw": 0,
-		"energy_gain": 0, "repeat": 0, "armor_break": 0, "school": "",
-		"player_hp": player.hp, "player_max_hp": player.max_hp,
-		"player_energy": player.energy, "player_max_energy": player.max_energy,
-		"player_block": player.block,
-		"player_chan": player.chan, "player_jianyi": player.jianyi,
-		"player_next_card_discount": player.next_card_discount,
-		"enemy_hp": enemy.hp, "enemy_max_hp": enemy.max_hp,
-		"enemy_block": enemy.block,
-		"enemy_intent_type": enemy.intent_type, "enemy_intent_value": enemy.intent_value,
-		"hand_size": hand.cards.size(),
-		"last_played_card_id": last_played_card_id,
-		"last_played_card_type": last_played_card_type,
-		"skill_played_this_turn": skill_played_this_turn,
-		"energy_used_this_turn": energy_used_this_turn,
-		"actual_cost": 0,
-		"damage_bonus": GameData.get_damage_bonus(),
-		"block_bonus": GameData.get_block_bonus(),
-	}
 
 func _on_enemy_hp_changed(cur, max_val):
 	enemy_hp_label.text = "敌人 HP %d/%d" % [cur, max_val]
@@ -2023,11 +1480,13 @@ func _on_enemy_hp_changed(cur, max_val):
 	else:
 		enemy_block_label.text = ""
 
+
 func _on_enemy_block_changed(cur):
 	if cur > 0:
 		enemy_block_label.text = "护盾 %d" % cur
 	else:
 		enemy_block_label.text = ""
+
 
 func _on_enemy_intent_changed(type: int, value: int):
 	var intent_names = ["⚔攻击", "🛡防御"]
@@ -2043,7 +1502,7 @@ func _on_deck_label_clicked(event: InputEvent):
 	and event.pressed \
 	and event.button_index == MOUSE_BUTTON_LEFT:
 		get_viewport().set_input_as_handled()
-		var dp = draw_pile_p2 if _active_player == 2 else draw_pile
+		var dp = _draw_pile_of(_active_player)
 		var shuffled = dp.duplicate()
 		shuffled.shuffle()
 		pile_viewer.open(shuffled, "牌库")
@@ -2054,72 +1513,38 @@ func _on_discard_label_clicked(event: InputEvent):
 	and event.pressed \
 	and event.button_index == MOUSE_BUTTON_LEFT:
 		get_viewport().set_input_as_handled()
-		var dc = discard_pile_p2 if _active_player == 2 else discard_pile
+		var dc = _discard_pile_of(_active_player)
 		pile_viewer.open(dc, "弃牌堆")
 
 
 # ==============================
-# 楼层与战斗初始化
+# 回合标签 / 激活指示
 # ==============================
-
-func _start_battle():
-	var ft = GameData.get_floor_type()
-	var ft_names = ["普通", "精英", "Boss"]
-	enemy.init_from_floor(GameData.current_floor, ft)
-	
-	# 设置背景图
-	var biome_names = ["竹林", "村庄", "官府", "门派"]
-	var bg_tex = BIOME_BG.get(GameData.current_biome)
-	if bg_tex:
-		_battle_bg.texture = bg_tex
-	
-	# 从当前生态的敌人池里随机选一个
-	var pool = BIOME_ENEMIES.get(GameData.current_biome, {})
-	var key = "boss" if ft == GameData.FloorType.BOSS else ("elite" if ft == GameData.FloorType.ELITE else "normal")
-	var candidates = pool.get(key, ["山匪"])
-	if candidates.size() > 0:
-		# 用楼层做种子确保两边选同一只
-		var idx = GameData.current_floor % candidates.size()
-		var eid = candidates[idx]
-		var tex_path = "res://assets/images/enemies/%s.tres" % eid
-		enemy_portrait.texture = load(tex_path)
-		print("敌人: %s" % eid)
-	
-	_update_floor_label()
-	var biome_name = biome_names[GameData.current_biome] if GameData.current_biome < biome_names.size() else "?"
-	print("===== 第 %d 层 · %s战 · %s =====" % [GameData.current_floor, ft_names[ft], biome_name])
-
-
-func _update_floor_label():
-	var ft = GameData.get_floor_type()
-	var ft_names = ["战斗", "⚔精英", "♛Boss"]
-	floor_label.text = "第 %d 层 · %s" % [GameData.current_floor, ft_names[ft]]
-
 
 func _update_turn_label(suffix: String):
 	turn_label.text = "%s境 · %s" % [GameData.realm_names[GameData.current_realm], suffix]
 
 
-## 更新当前激活玩家的视觉指示（头像边框高亮 + 回合标签）
 func _update_active_indicator():
-	if not GameData.is_dual_mode or NetworkManager.is_lan:
-		# 单人/联机模式：不需要指示
+	if not _is_dual() or NetworkManager.is_lan:
 		_update_turn_label("玩家%d的回合" % _active_player)
 		return
-	
+
 	# 双人同屏：高亮当前激活玩家
 	p1_portrait.modulate = Color(1, 1, 1, 1.0) if _active_player == 1 else Color(0.5, 0.5, 0.5, 0.6)
 	p2_portrait.modulate = Color(1, 1, 1, 1.0) if _active_player == 2 else Color(0.5, 0.5, 0.5, 0.6)
-	
-	# 显示双方结束状态
-	var p1_status = " ✓" if turn_manager.p1_ended else ""
-	var p2_status = " ✓" if turn_manager.p2_ended else ""
-	
-	if turn_manager.p1_ended and not turn_manager.p2_ended:
-		_update_turn_label("玩家2回合%s (P1已结束)" % p2_status)
-	elif turn_manager.p2_ended and not turn_manager.p1_ended:
-		_update_turn_label("玩家1回合%s (P2已结束)" % p1_status)
-	elif turn_manager.p1_ended and turn_manager.p2_ended:
+
+	if not (turn_manager and is_instance_valid(turn_manager)):
+		_update_turn_label("玩家%d回合" % _active_player)
+		return
+	var p1_ended := turn_manager.has_player_ended(1)
+	var p2_ended := turn_manager.has_player_ended(2)
+
+	if p1_ended and not p2_ended:
+		_update_turn_label("玩家2回合 (P1已结束)")
+	elif p2_ended and not p1_ended:
+		_update_turn_label("玩家1回合 (P2已结束)")
+	elif p1_ended and p2_ended:
 		_update_turn_label("敌人回合...")
 	else:
 		_update_turn_label("玩家%d回合 (点击头像切换)" % _active_player)
@@ -2129,20 +1554,26 @@ func _update_active_indicator():
 # 断线 / 重连处理
 # ==============================
 
+func _on_player_died():
+	_on_battle_end(false)
+
+
+func _on_enemy_died_by_signal():
+	if not game_over:
+		_on_battle_end(true)
+
+
 func _on_player_disconnected():
 	if NetworkManager.is_host:
-		# 主机：显示提示，游戏暂停
 		_show_waiting_mask("P2已断开，等待重连...")
 		print("[断线] 主机等待客机重连")
 	else:
-		# 客机：回主菜单
 		print("[断线] 客机返回主菜单")
 		get_tree().change_scene_to_file("res://scenes/start_screen.tscn")
 
 
 func _on_player_reconnected():
 	if NetworkManager.is_host:
-		# 主机：推送重连数据
 		print("[重连] 客机重连中，推送快照...")
 		NetworkManager.send_reconnect_data()
 		_hide_waiting_mask()

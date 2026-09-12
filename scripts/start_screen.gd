@@ -38,13 +38,13 @@ func _on_start_unhover():
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _on_start():
-	GameData.is_dual_mode = false
+	GameData.start_run(false)
 	if GameData.has_save():
 		GameData.delete_save()
 	get_tree().change_scene_to_file("res://scenes/select_school.tscn")
 
 func _on_dual():
-	GameData.is_dual_mode = true
+	GameData.start_run(true)
 	if GameData.has_save():
 		GameData.delete_save()
 	get_tree().change_scene_to_file("res://scenes/select_school.tscn")
@@ -53,23 +53,21 @@ func _on_continue():
 	if not GameData.has_save():
 		_toast("没有旧存档")
 		return
-	
-	if NetworkManager.is_host and not NetworkManager.p2_peer_id:
-		GameData.load_game()
-		GameData.is_dual_mode = true
-		GameData.loading_save = true
-		get_tree().change_scene_to_file("res://scenes/main.tscn")
-		_toast("等待P2重连...")
+
+	if not GameData.load_game():
+		_toast("存档读取失败")
 		return
-	
-	GameData.load_game()
-	GameData.is_dual_mode = false
-	GameData.loading_save = true
+
+	# 模式标志由存档恢复，不再硬编码成单人（A4）
+	GameData.start_run(GameData.is_dual_mode, true)
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
+
+	if NetworkManager.is_host and not NetworkManager.p2_peer_id:
+		_toast("等待P2重连...")
 
 func _on_host():
 	if NetworkManager.host_game():
-		GameData.is_dual_mode = true
+		GameData.start_run(true)
 		GameData.new_dual_run()
 		NetworkManager.host_in_select = true
 		get_tree().change_scene_to_file("res://scenes/select_school.tscn")
@@ -90,10 +88,8 @@ func _on_network_ready():
 		NetworkManager.game_start_ready.connect(_on_game_start)
 
 func _on_game_start():
-	GameData.is_dual_mode = true
-	# 只有重连场景才设 loading_save
-	if NetworkManager.p2_reconnecting:
-		GameData.loading_save = true
+	# 只有重连场景才需要 loading_save 标记
+	GameData.start_run(true, NetworkManager.p2_reconnecting)
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 func _toast(msg: String):
@@ -108,6 +104,9 @@ func _toast(msg: String):
 	tw.finished.connect(toast.queue_free)
 
 func _on_test():
+	# 测试牌组走单人口径，必须显式重置模式。
+	# 原先这里漏设，玩过双人之后点进来，is_dual_mode 会残留 true（A3）
+	GameData.start_run(false)
 	get_tree().change_scene_to_file("res://scenes/test_deck.tscn")
 
 func _on_quit_hover():
@@ -140,5 +139,5 @@ func _on_quit():
 
 # RPC回调：主机通知客机进入选人界面
 func network_enter_select_school():
-	GameData.is_dual_mode = true
+	GameData.start_run(true)
 	get_tree().change_scene_to_file("res://scenes/select_school.tscn")

@@ -12,11 +12,11 @@ var _p1_school: String = ""  # P1选的门派
 
 var passive_descs = {
 	"huiming": "【少林·禅意】每获得1层禅意，回复1点生命",
-	"linfeng": "【武当·剑意】每消耗1层剑意，造成1点额外伤害",
+	"linfeng": "【武当·剑意】每消耗1层剑意，攻击伤害+1",
 	"yunzhi": "【逍遥·奇策】每回合第一次出牌，费用-1",
-	"moyao": "【待定】",
-	"xuanweng": "【待定】",
-	"yexiao": "【待定】"
+	"moyao": "【墨门·连弩】每回合打出的第2张攻击牌，伤害+2",
+	"xuanweng": "【奇门·遁甲】每回合首次受到攻击前，格挡+2",
+	"yexiao": "【血影】生命低于50%时，每回合开始多抽1张牌"
 }
 
 var story_texts = {
@@ -362,7 +362,5 @@ func _on_back():
 
 # LAN 客机：主机选完角色后进入游戏
 func _on_lan_game_start():
-	GameData.is_dual_mode = true
-	if NetworkManager.p2_reconnecting:
-		GameData.loading_save = true
+	GameData.start_run(true, NetworkManager.p2_reconnecting)
 	get_tree().change_scene_to_file("res://scenes/main.tscn")

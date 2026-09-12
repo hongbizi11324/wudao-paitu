@@ -113,9 +113,10 @@ func _calc_floor_type(floor_num: int) -> FloorType:
 	return FloorType.NORMAL
 
 
-func advance_floor():
-	current_floor += 1
-	print("【楼层推进】当前第 %d 层" % current_floor)
+# 楼层推进的唯一入口是地图：select_map_node() 选中节点时直接把
+# current_floor 设为该节点的楼层号。
+# ⚠️ 曾有 bug：选战斗节点后额外调 advance_floor() 再 +1，导致
+# Boss 楼（每 6 层）永远错位成普通战。禁止再写任何"再推进一层"的函数。
 
 
 # ---------- 地图节点系统 ----------
@@ -128,33 +129,16 @@ enum NodeType {
 	EVENT
 }
 
-# 为当前楼层生成节点选项（返回 NodeType 数组）
-func generate_node_options() -> Array:
-	var options = []
-	
-	# 始终包含一个战斗节点
-	var battles = [NodeType.BATTLE_NORMAL]
-	# 如果是精英/Boss楼层，加入精英战斗选项
-	var ft = _calc_floor_type(current_floor)
-	if ft == FloorType.ELITE or ft == FloorType.BOSS:
-		battles.append(NodeType.BATTLE_ELITE)
-	
-	# 从战斗池里随机选一个
-	battles.shuffle()
-	options.append(battles[0])
-	
-	# 其余格子：非战斗节点
-	var non_battle = [NodeType.SHOP, NodeType.REST, NodeType.EVENT]
-	non_battle.shuffle()
-	
-	# 选 1-2 个非战斗节点（总共 2-3 个选项）
-	var extra_count = randi() % 2 + 1  # 1 或 2
-	for i in range(min(extra_count, non_battle.size())):
-		options.append(non_battle[i])
-	
-	options.shuffle()
-	print("【节点】第 %d 层选项: " % current_floor, options)
-	return options
+# ---------- 战斗奖励（按楼层类型缩放，与地图悬停提示一致） ----------
+
+func get_battle_reward() -> Dictionary:
+	match _calc_floor_type(current_floor):
+		FloorType.BOSS:
+			return {"cultivation": 40, "gold": 50}
+		FloorType.ELITE:
+			return {"cultivation": 20, "gold": 20}
+		_:
+			return {"cultivation": 10, "gold": 12}
 
 
 # ---------- 随机事件数据 ----------
@@ -250,6 +234,46 @@ func get_random_new_card() -> String:
 	return all_card_pool[randi() % all_card_pool.size()]
 
 
+# ---------- 门派感知卡池 ----------
+
+# 通用基础卡（所有角色可获得）
+const NEUTRAL_CARDS: Array = [
+	"punch", "meditate", "light_step", "strike", "defend",
+	"double_strike", "tactics", "iron_wall", "vigor", "whirlwind",
+	"flowing_cloud_sword", "triple_stab", "sword_energy",
+	"iron_shirt", "vajra_fist", "golden_bell", "bash", "heal",
+]
+
+# 门派专属卡
+const SCHOOL_CARDS: Dictionary = {
+	"shaolin": ["sl_fist", "sl_iron", "sl_golden", "sl_arhat", "sl_damo"],
+	"wudang": ["wd_taiji", "wd_soft", "wd_steps", "wd_heavy", "wd_twoway"],
+	"xiaoyao": [
+		"xy_beiming", "xy_lingbo", "xy_wuxiang", "xy_zhemel", "xy_bahuang",
+		"xy_xiaoyaoyou", "xy_xingluo", "xy_fengjuan", "xy_guicang", "xy_fuguang",
+		"xy_yufeng", "xy_duanliu", "xy_wanxiang", "xy_xiuli", "xy_lianhuan",
+		"xy_houfa", "xy_jinghua", "xy_wujian", "xy_xushi", "xy_yixing",
+		"xy_hantan", "xy_qiguan", "xy_tuna", "xy_longxiang", "xy_baoyuan",
+		"xy_xixing", "xy_guanxing", "xy_fange", "xy_yibizhi", "xy_duotian",
+	],
+}
+
+
+## 角色可选卡池 = 通用 + 本门派专属。
+## extra_schools: 双人模式下另一名玩家的门派也并入（奖励/商店对全队开放）
+func get_character_pool(character_id: String = "", extra_schools: Array = []) -> Array:
+	var cid = character_id if character_id != "" else selected_character
+	var pool: Array = NEUTRAL_CARDS.duplicate()
+	var schools: Array = [character_data.get(cid, {}).get("school", "")]
+	schools.append_array(extra_schools)
+	for sk in schools:
+		if sk is String and sk != "" and SCHOOL_CARDS.has(sk):
+			for c in SCHOOL_CARDS[sk]:
+				if not pool.has(c):
+					pool.append(c)
+	return pool
+
+
 # ---------- 牌组 ----------
 
 var player_deck: Array = []
@@ -293,6 +317,26 @@ func get_meditate_gain() -> int:
 
 const BUY_PRICE: int = 10
 const DELETE_PRICE: int = 6
+
+
+# ==============================
+# 进入一局游戏的唯一入口（A3 修复）
+# ==============================
+
+## 设置本局的模式，并重置与之绑定的派生状态。
+##
+## 这是全项目【唯一】允许写 is_dual_mode 的地方。
+##
+## 为什么要收敛：AutoLoad 挂在 SceneTree 根下，change_scene_to_file 只换
+## current_scene、不碰 AutoLoad，所以 AutoLoad 上的状态是进程级的，
+## 上一局的模式会残留到下一局。原先有 8 个地方直接给 is_dual_mode 赋值，
+## 分散在 3 个文件里，漏掉的那个（"测试牌组"入口）就是 bug 来源。
+##
+## 规则：放在 AutoLoad 上的每一份状态，都必须有明确的重置点。
+func start_run(dual: bool, from_save: bool = false) -> void:
+	is_dual_mode = dual
+	loading_save = from_save
+	print("[GameData] start_run: dual=%s from_save=%s" % [dual, from_save])
 
 
 # ==============================
@@ -340,20 +384,11 @@ func new_run_custom(deck: Array):
 
 func new_dual_run():
 	new_run()
-	gold = 20
-	player_deck = starter_deck.duplicate()
-	
-	# 玩家1初始化
-	player_deck = starter_deck.duplicate()
-	player_hp = 60
-	player_max_hp = 60
-	
-	# 玩家2初始化
-	player2_deck = starter_deck.duplicate()
+	# 玩家2初始化（new_run 已把 P1 初始化完成）
 	player2_hp = 60
 	player2_max_hp = 60
+	player2_deck = starter_deck.duplicate()
 	player2_realm = 0
-	
 	print("【双人模式】第1层·双玩家起步，每人 %d 张牌" % player_deck.size())
 
 
@@ -555,10 +590,13 @@ func _gen_column_nodes(ft: FloorType, layer_idx: int, total: int) -> Array:
 		types.append(NodeType.BATTLE_ELITE)
 	else:
 		types.append(NodeType.BATTLE_NORMAL)
-	
+
 	var pool = [NodeType.BATTLE_NORMAL, NodeType.SHOP, NodeType.REST, NodeType.EVENT]
 	if ft == FloorType.ELITE:
 		pool.append(NodeType.BATTLE_ELITE)
+	if ft == FloorType.BOSS:
+		# Boss楼层：唯一战斗节点即Boss战，其余候选全为非战斗
+		pool = [NodeType.SHOP, NodeType.REST, NodeType.EVENT]
 	pool.shuffle()
 	
 	for i in range(count - 1):
@@ -578,6 +616,13 @@ func _gen_column_nodes(ft: FloorType, layer_idx: int, total: int) -> Array:
 	var nodes = []
 	for i in range(count):
 		nodes.append({ "type": types[i], "col": used_cols[i] })
+	
+	# 大关中Boss楼层（每6层，如第6/18层）：该层的战斗节点标记 is_boss，
+	# 地图用Boss图标显示，战斗用Boss数值（否则图标与实际难度不符）
+	if ft == FloorType.BOSS:
+		for node in nodes:
+			if node.type == NodeType.BATTLE_NORMAL or node.type == NodeType.BATTLE_ELITE:
+				node.is_boss = true
 	nodes.sort_custom(func(a, b): return a.col < b.col)
 	return nodes
 
@@ -735,6 +780,8 @@ func delete_save():
 func save_game():
 	var data = {
 		"version": SAVE_VERSION,
+		# 模式标志必须进存档：它决定游戏行为，不存的话读档回来行为就变了（A4）
+		"is_dual_mode": is_dual_mode,
 		"player": {
 			"character": selected_character,
 			"realm": current_realm,
@@ -789,6 +836,9 @@ func load_game() -> bool:
 		push_error("[存档] 解析失败")
 		return false
 	
+	# 模式标志：老存档没有这个字段，用 get 兜底（A4）
+	is_dual_mode = parsed.get("is_dual_mode", false)
+
 	var p = parsed["player"]
 	selected_character = p["character"]
 	current_realm = p["realm"]

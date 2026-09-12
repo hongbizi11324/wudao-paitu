@@ -2,6 +2,12 @@
 class_name CardData
 extends Resource
 
+# ==============================
+# 卡牌数据
+# 数值全部来自 .tres；效果逻辑唯一来源是 lua/cards/*.lua（可热更）
+# Lua 不可用时回退 GDScript 通用结算（main._fallback_result）
+# ==============================
+
 enum CardType { ATTACK, SKILL, POWER, INNER, MOVEMENT }
 
 @export var card_id: String = ""
@@ -10,7 +16,7 @@ enum CardType { ATTACK, SKILL, POWER, INNER, MOVEMENT }
 @export var cost: int = 1
 @export var description: String = ""
 
-# ---- 旧版字段（兼容，方便快速编辑） ----
+# ---- 数值字段（Lua 从 ctx 读取） ----
 @export var damage: int = 0
 @export var block: int = 0
 @export var heal: int = 0
@@ -20,13 +26,3 @@ enum CardType { ATTACK, SKILL, POWER, INNER, MOVEMENT }
 @export var energy_gain: int = 0
 @export var armor_break: int = 0
 @export var school: String = ""
-
-# ---- 新版效果系统（优先使用） ----
-# effects 数组不为空时，使用效果系统执行
-# 为空时回退到旧版字段模式
-@export var effects: Array[EffectResource] = []
-
-
-# 是否已迁移到效果系统
-func has_effects() -> bool:
-	return effects.size() > 0

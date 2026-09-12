@@ -4,6 +4,9 @@ extends Node
 # ==============================
 # 敌人
 # 楼层递进 + 意图系统 + 护盾
+#
+# 目标选择：双人模式下从存活玩家中用已播种 RNG 随机选一个
+# （host 权威执行，客机通过快照看到结果，天然同步）
 # ==============================
 
 enum FloorType { NORMAL, ELITE, BOSS }
@@ -27,38 +30,52 @@ signal died()
 signal intent_changed(type: int, value: int)
 
 
-# 旧版 init 保留（兼容旧调用）
-func init(hp_val: int = 25):
-	max_hp = hp_val
-	hp = max_hp
-	block = 0
-	floor_type = FloorType.NORMAL
-
-
-# 新版：根据楼层和类型初始化
+## 新版：根据楼层和类型初始化。
+## 双人模式 HP ×1.5（两人输出接近翻倍，避免合作模式变成无双割草）
 func init_from_floor(_floor_num: int, ftype: FloorType):
 	_rng = RandomNumberGenerator.new()
-	# 用楼层+大关做种子，保证两边生成同一只敌人
+	# 用楼层+大关做种子，保证重连/重试时生成同一只敌人
 	_rng.set_seed(_floor_num * 1000 + max(0, GameData.map_act_count))
 	floor_type = ftype
 	var dmg_range = GameData.get_enemy_damage_range()
 	base_damage_min = dmg_range[0]
 	base_damage_max = dmg_range[1]
-	
+
 	max_hp = GameData.get_enemy_hp()
+	if GameData.is_dual_mode:
+		max_hp = ceili(max_hp * 1.5)
 	hp = max_hp
 	block = 0
-	
+
 	# 精英：开局自带护盾（15%血量）
 	if ftype == FloorType.ELITE:
 		block = maxi(3, ceili(max_hp * 0.15))
 		block_changed.emit(block)
-	
+
 	var type_name = ["普通", "精英", "Boss"][ftype]
-	print("【%s战】HP:%d/%d  攻击:%d-%d  格挡:%d" % [type_name, hp, max_hp, base_damage_min, base_damage_max, block])
-	
+	print("【%s战】HP:%d/%d  攻击:%d-%d  格挡:%d%s" % [
+		type_name, hp, max_hp, base_damage_min, base_damage_max, block,
+		" (双人缩放×1.5)" if GameData.is_dual_mode else ""])
+
 	# 开局规划第一轮意图
 	plan_intent()
+
+
+# ==============================
+# 目标选择
+# ==============================
+
+## 从存活的玩家里随机选一个攻击目标（用已播种 RNG，主机权威、可复现）
+func choose_target(players: Array) -> Node:
+	var alive: Array = []
+	for p in players:
+		if p and is_instance_valid(p) and p.hp > 0:
+			alive.append(p)
+	if alive.is_empty():
+		return null
+	if alive.size() == 1:
+		return alive[0]
+	return alive[_rng.randi_range(0, alive.size() - 1)]
 
 
 # ==============================
@@ -80,18 +97,18 @@ func plan_intent():
 				attack_chance = 0.5   # 第二阶段：五五开
 			else:
 				attack_chance = 0.3   # 第一阶段：更倾向叠盾
-	
+
 	if _rng.randf() < attack_chance:
 		intent_type = IntentType.ATTACK
 		intent_value = _calc_attack_damage()
 	else:
 		intent_type = IntentType.DEFEND
 		intent_value = _calc_defend_amount()
-	
+
 	intent_changed.emit(intent_type, intent_value)
-	
+
 	var intent_names = ["攻击", "防御"]
-	print("敌人意图: %s %d" % [intent_names[intent_type], intent_value])
+	print("敌人意图: %s %d" % [intent_names[int(intent_type)], intent_value])
 
 
 # 执行当前意图（敌人回合开始时调用）
@@ -110,14 +127,14 @@ func execute_intent(_player: Node) -> bool:
 # 计算攻击伤害（考虑 Boss 多阶段加成）
 func _calc_attack_damage() -> int:
 	var base = _rng.randi_range(base_damage_min, base_damage_max)
-	
+
 	if floor_type == FloorType.BOSS:
 		var hp_pct = float(hp) / float(max_hp)
 		if hp_pct < 0.33:
 			return ceili(base * 2.0)   # 第三阶段：2x
 		elif hp_pct < 0.66:
 			return ceili(base * 1.5)   # 第二阶段：1.5x
-	
+
 	return base
 
 
@@ -144,21 +161,21 @@ func get_attack_damage() -> int:
 # 受伤害（格挡先吸收）
 func take_damage(amount: int, armor_break: int = 0) -> int:
 	var remaining = amount
-	
+
 	# 破甲：先摧毁护盾（即便超过护盾量）
 	if armor_break > 0 and block > 0:
 		var broken = min(block, armor_break)
 		block -= broken
 		block_changed.emit(block)
 		print("破甲摧毁 %d 护盾" % broken)
-	
+
 	# 格挡吸收伤害
 	if block > 0:
 		var blocked = min(block, remaining)
 		block -= blocked
 		remaining -= blocked
 		block_changed.emit(block)
-	
+
 	var actual_dmg = min(remaining, hp)
 	hp -= actual_dmg
 	hp_changed.emit(hp, max_hp)
@@ -173,12 +190,12 @@ func on_turn_start():
 	# 护盾每回合重置
 	block = 0
 	block_changed.emit(block)
-	
+
 	match floor_type:
 		FloorType.ELITE:
 			block += ceili(max_hp * 0.04)
 			block_changed.emit(block)
-		
+
 		FloorType.BOSS:
 			var hp_pct = float(hp) / float(max_hp)
 			if hp_pct < 0.33:

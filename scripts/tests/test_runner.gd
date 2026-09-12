@@ -1,11 +1,9 @@
 @tool
 extends EditorScript
 # ==============================
-# 单元测试运行器
-#
-# 使用方法：
-# 1. 在脚本编辑器中打开此文件
-# 2. 按 Ctrl+Shift+X（或点脚本编辑器顶部的「运行」按钮）
+# 单元测试运行器（编辑器模式）
+# 在脚本编辑器打开本文件按 Ctrl+Shift+X 运行；
+# 无头环境请用：godot --headless --path . res://tests/test_boot.tscn
 # ==============================
 
 func _run():
@@ -13,18 +11,36 @@ func _run():
 	print("  武道牌途 — 单元测试")
 	print("  Godot %s" % Engine.get_version_info().get("string", "?"))
 	print("%s" % "=".repeat(40))
-	
-	var all_passed = true
-	
-	# 效果系统测试
-	print("\n▶ 运行效果系统测试...")
-	var ok = TestEffects.run()
-	if ok:
-		print("  ✅ 效果系统测试通过")
-	else:
-		print("  ❌ 效果系统测试有失败项")
+
+	TestBase.reset()
+	var all_passed := true
+
+	print("\n▶ 回合状态机测试...")
+	TestBase.reset()
+	if not TestTurnManager.run():
 		all_passed = false
-	
+
+	print("\n▶ 全局数据与地图测试...")
+	TestBase.reset()
+	if not TestGameData.run():
+		all_passed = false
+
+	print("\n▶ 出牌结算器测试...")
+	TestBase.reset()
+	var tmp_parent := Node.new()
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree:
+		tree.root.add_child(tmp_parent)
+	if not TestCardExecutor.run(tmp_parent):
+		all_passed = false
+	if tree:
+		tmp_parent.queue_free()
+
+	print("\n▶ Lua 卡牌效果测试...")
+	TestBase.reset()
+	if not TestLuaCards.run():
+		all_passed = false
+
 	print("\n%s" % "=".repeat(40))
 	if all_passed:
 		print("  全部测试通过! ✅")

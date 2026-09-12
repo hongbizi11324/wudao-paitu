@@ -21,9 +21,9 @@ func _ready():
 
 
 # 打开奖励弹窗
-# options: 3 个 card_id 的数组
-func open(options: Array):
-	title_label.text = "选择一张奖励卡牌"
+# options: 3 个 card_id 的数组；title: 可选标题（双人模式区分 P1/P2）
+func open(options: Array, title_text: String = ""):
+	title_label.text = title_text if title_text != "" else "选择一张奖励卡牌"
 	
 	# 清空旧的
 	for c in card_container.get_children():

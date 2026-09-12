@@ -1,38 +1,57 @@
 extends Node
 
 # ==============================================
-# LuaRuntime — Lua 热更桥接层
-# 管理 LuaState 生命周期，提供卡牌效果调用和热重载接口
+# LuaRuntime — Lua 热更桥接层（Command Pattern 版）
+#
+# 架构约定（与旧版的本质区别）：
+#   Lua 是纯函数——只读 ctx、返回「结果清单」，不写任何游戏状态。
+#   GDScript 拿到清单后由 CardExecutor 原子执行。
+#   - Lua 报错 → 清单没返回 → 什么都不执行 → 无需快照/回滚/沙箱
+#   - 无需 gd_* 写回调、无需 host 全局注入（旧 bug：host 从未绑定恒为 nil）
+#   - 预览与出牌共用同一份纯函数，预览天然无副作用
+#
+# 模块化：cards/basic|shaolin|wudang|xiaoyao|yunzhi.lua 按序加载，
+# 各自向全局 CardEffects 表注册卡牌函数；battle.lua 提供 POWER 触发。
 # ==============================================
 
 signal lua_reloaded(file_path: String)
 signal lua_error(error_msg: String)
 
 var _lua: LuaState
-var _loaded_files: Dictionary = {}
+var _loaded_files: Dictionary = {}   # res路径 -> mtime
 var _ready_flag: bool = false
 var _auto_reload: bool = true
 var _check_interval: float = 1.0
 var _timer: float = 0.0
+var _func_cache: Dictionary = {}     # card_id -> 编译好的 LuaFunction（TODO P5）
 
 var enabled: bool = true
 
-# Lua 脚本路径
-const CARDS_LUA_PATH = "res://lua/cards.lua"
-const ENEMY_AI_LUA_PATH = "res://lua/enemy_ai.lua"
-const BATTLE_LUA_PATH = "res://lua/battle.lua"
-
-# 宿主回调（由 main.gd 设置）
-var host: Node = null
+# Lua 模块（按加载顺序；cards 聚合后再加载战斗逻辑）
+const CARD_MODULES: Array = [
+	"res://lua/cards/basic.lua",
+	"res://lua/cards/shaolin.lua",
+	"res://lua/cards/wudang.lua",
+	"res://lua/cards/xiaoyao.lua",
+	"res://lua/cards/yunzhi.lua",
+]
+const BATTLE_LUA_PATH: String = "res://lua/battle.lua"
 
 
 func _ready() -> void:
 	_init_lua_state()
-	_load_cards_script()
-	_load_enemy_ai_script()
-	_load_battle_script()
-	_ready_flag = true
-	print("[LuaRuntime] 初始化完成（自动热更: 每%.0f秒检测，Ctrl+R 手动触发）" % _check_interval)
+	var ok := true
+	for path in CARD_MODULES:
+		if not _load_file(path):
+			ok = false
+	if not _load_file(BATTLE_LUA_PATH):
+		ok = false
+	if ok:
+		_ready_flag = true
+		print("[LuaRuntime] 初始化完成：%d 个卡牌模块 + battle.lua（自动热更: 每%.0f秒检测，Ctrl+R 手动触发）" % [
+			CARD_MODULES.size(), _check_interval])
+	else:
+		push_error("[LuaRuntime] 初始化失败，卡牌逻辑回退 GDScript 基础结算")
 
 
 func _process(delta: float) -> void:
@@ -47,167 +66,23 @@ func _process(delta: float) -> void:
 func _init_lua_state() -> void:
 	_lua = LuaState.new()
 	_lua.open_libraries()
-	_setup_godot_bindings()
-
-
-func _setup_godot_bindings() -> void:
-	# ---- 基础数值查询 ----
-	_lua.globals["gd_get_damage_bonus"] = func(): return GameData.get_damage_bonus()
-	_lua.globals["gd_get_block_bonus"] = func(): return GameData.get_block_bonus()
-	_lua.globals["gd_get_punch_damage"] = func(): return GameData.get_punch_damage()
-	_lua.globals["gd_get_meditate_gain"] = func(): return GameData.get_meditate_gain()
-
-	# ---- 玩家状态操作 ----
-	_lua.globals["gd_player_heal"] = func(amount): if host and host.player: host.player.heal(amount)
-	_lua.globals["gd_player_add_block"] = func(amount): if host and host.player: host.player.add_block(amount)
-	_lua.globals["gd_player_gain_energy"] = func(amount): if host and host.player: host.player.gain_energy(amount)
-	_lua.globals["gd_player_chan_plus"] = func(amount): if host and host.player: host.player.chan += amount
-	_lua.globals["gd_player_chan_reset"] = func(): if host and host.player: host.player.chan = 0
-	_lua.globals["gd_player_jianyi_plus"] = func(amount): if host and host.player: host.player.jianyi += amount
-	_lua.globals["gd_player_jianyi_minus"] = func(amount): if host and host.player: host.player.jianyi = max(0, host.player.jianyi - amount)
-	_lua.globals["gd_player_set_next_discount"] = func(amount): if host and host.player: host.player.next_card_discount = amount
-
-	# ---- 敌人状态操作 ----
-	_lua.globals["gd_enemy_take_damage"] = func(dmg, armor_break): if host and host.enemy: host.enemy.take_damage(dmg, armor_break)
-	_lua.globals["gd_enemy_hp"] = func(): return host.enemy.hp if host and host.enemy else 0
-	_lua.globals["gd_enemy_max_hp"] = func(): return host.enemy.max_hp if host and host.enemy else 1
-	_lua.globals["gd_enemy_block"] = func(): return host.enemy.block if host and host.enemy else 0
-	_lua.globals["gd_enemy_intent_type"] = func(): return host.enemy.intent_type if host and host.enemy else 0
-	_lua.globals["gd_enemy_intent_value"] = func(): return host.enemy.intent_value if host and host.enemy else 0
-
-	# ---- 手牌操作 ----
-	_lua.globals["gd_hand_size"] = func(): return host.hand.cards.size() if host and host.hand else 0
-	_lua.globals["gd_hand_card_ids"] = func():
-		var ids = []
-		if host and host.hand:
-			for c in host.hand.cards:
-				ids.append(c.card_data.card_id)
-		return ids
-	_lua.globals["gd_discard_card_by_index"] = func(idx):
-		if not host or not host.hand: return
-		if idx < 0 or idx >= host.hand.cards.size(): return
-		var c = host.hand.cards[idx]
-		var dc = host.discard_pile_p2 if host._active_player == 2 else host.discard_pile
-		dc.append(c.card_data.card_id)
-		host.hand.remove_card(c)
-		host.CardPool.release(c)
-	_lua.globals["gd_add_card_to_hand"] = func(card_id):
-		if not host: return
-		var path = "res://resources/cards/%s.tres" % card_id
-		var data = load(path)
-		if not data: return
-		var cscene = load("res://scenes/card.tscn")
-		var new_card = host.CardPool.acquire(cscene)
-		new_card.setup(data)
-		if not host.hand.add_card(new_card):
-			host.CardPool.release(new_card)
-			var dc = host.discard_pile_p2 if host._active_player == 2 else host.discard_pile
-			dc.append(card_id)
-
-	# ---- 牌堆操作 ----
-	_lua.globals["gd_draw_pile_size"] = func():
-		if not host: return 0
-		var dp = host.draw_pile_p2 if host._active_player == 2 else host.draw_pile
-		return dp.size()
-	_lua.globals["gd_discard_pile_ids"] = func():
-		var ids = []
-		if not host: return ids
-		var dc = host.discard_pile_p2 if host._active_player == 2 else host.discard_pile
-		for id in dc: ids.append(id)
-		return ids
-	_lua.globals["gd_move_card_to_draw_pile"] = func(idx):
-		if not host or not host.hand: return
-		if idx < 0 or idx >= host.hand.cards.size(): return
-		var c = host.hand.cards[idx]
-		var dp = host.draw_pile_p2 if host._active_player == 2 else host.draw_pile
-		dp.append(c.card_data.card_id)
-		host.hand.remove_card(c)
-		host.CardPool.release(c)
-	_lua.globals["gd_draw_cards"] = func(count):
-		if not host: return
-		var dp = host.draw_pile_p2 if host._active_player == 2 else host.draw_pile
-		var dc = host.discard_pile_p2 if host._active_player == 2 else host.discard_pile
-		host._switch_draw(host.hand, dp, dc, count)
-
-	# ---- 内力操作 ----
-	_lua.globals["gd_player_spend_energy"] = func(amount):
-		if not host or not host.player: return
-		host.player.energy = max(0, host.player.energy - amount)
-		host.energy_used_this_turn += amount
-		host.player.energy_changed.emit(host.player.energy, host.player.max_energy)
-	_lua.globals["gd_player_energy"] = func(): return host.player.energy if host and host.player else 0
-	_lua.globals["gd_player_max_energy"] = func(): return host.player.max_energy if host and host.player else 0
-
-	# ---- 游戏状态查询 ----
-	_lua.globals["gd_game_data"] = func(key):
-		match key:
-			"current_floor": return GameData.current_floor
-			"is_dual_mode": return GameData.is_dual_mode
-			"max_energy_per_realm": return GameData.max_energy_per_realm
-			"player_hp": return GameData.player_hp
-			"player_max_hp": return GameData.player_max_hp
-		return null
-
-	# ---- POWER 标记 ----
-	_lua.globals["gd_set_power"] = func(power_name, value):
-		if not host or not host.player: return
-		match power_name:
-			"damo": host.player.power_damo = value
-			"twoway": host.player.power_twoway = value
-			"bahuang": host.player.power_bahuang = value
-			"longxiang": host.player.power_longxiang = value
-			"xiaoyaoyou": host.player.power_xiaoyaoyou = value
-	_lua.globals["gd_get_power"] = func(power_name):
-		if not host or not host.player: return false
-		match power_name:
-			"damo": return host.player.power_damo
-			"twoway": return host.player.power_twoway
-			"bahuang": return host.player.power_bahuang
-			"longxiang": return host.player.power_longxiang
-			"xiaoyaoyou": return host.player.power_xiaoyaoyou
-		return false
-
-	# ---- UI 刷新 ----
-	_lua.globals["gd_update_ui"] = func():
-		if host:
-			host._update_deck_ui()
-			host._update_sect_ui()
-	_lua.globals["gd_print"] = func(msg): print(msg)
 
 
 # ==============================================
 # 文件加载
 # ==============================================
 
-func _load_cards_script() -> void:
-	var result = _lua.do_file(CARDS_LUA_PATH)
+func _load_file(file_path: String) -> bool:
+	if not FileAccess.file_exists(ProjectSettings.globalize_path(file_path)):
+		_report_error(file_path, "文件不存在")
+		return false
+	var result = _lua.do_file(file_path)
 	if result is LuaError:
-		_report_error(CARDS_LUA_PATH, result)
-	else:
-		_track_file(CARDS_LUA_PATH)
-		print("[LuaRuntime] cards.lua 加载成功")
-
-
-func _load_enemy_ai_script() -> void:
-	if not FileAccess.file_exists(ProjectSettings.globalize_path(ENEMY_AI_LUA_PATH)):
-		return
-	var result = _lua.do_file(ENEMY_AI_LUA_PATH)
-	if result is LuaError:
-		_report_error(ENEMY_AI_LUA_PATH, result)
-	else:
-		_track_file(ENEMY_AI_LUA_PATH)
-		print("[LuaRuntime] enemy_ai.lua 加载成功")
-
-
-func _load_battle_script() -> void:
-	if not FileAccess.file_exists(ProjectSettings.globalize_path(BATTLE_LUA_PATH)):
-		return
-	var result = _lua.do_file(BATTLE_LUA_PATH)
-	if result is LuaError:
-		_report_error(BATTLE_LUA_PATH, result)
-	else:
-		_track_file(BATTLE_LUA_PATH)
-		print("[LuaRuntime] battle.lua 加载成功")
+		_report_error(file_path, result)
+		return false
+	_track_file(file_path)
+	print("[LuaRuntime] 已加载 %s" % file_path)
+	return true
 
 
 func _report_error(file_path: String, result) -> void:
@@ -226,17 +101,31 @@ func _track_file(file_path: String) -> void:
 # 热重载
 # ==============================================
 
-func reload(file_path: String = CARDS_LUA_PATH) -> void:
-	print("[LuaRuntime] 正在重载 %s ..." % file_path)
-	var result = _lua.do_file(file_path)
-	if result is LuaError:
-		var msg = "[LuaRuntime] 重载失败: %s" % str(result)
-		push_error(msg)
-		lua_error.emit(msg)
+## 全量热重载：按依赖顺序重新执行所有模块，清空函数编译缓存。
+## 某个模块失败时保留已加载的旧函数（热更容错），并发出错误信号。
+func reload() -> void:
+	print("[LuaRuntime] 正在热重载所有 Lua 模块 ...")
+	var failed: Array = []
+	for path in CARD_MODULES:
+		var result = _lua.do_file(path)
+		if result is LuaError:
+			failed.append(path)
+			push_error("[LuaRuntime] 重载失败 %s: %s" % [path, str(result)])
+			lua_error.emit("[LuaRuntime] 重载失败 %s: %s" % [path, str(result)])
+		else:
+			_track_file(path)
+	var b_result = _lua.do_file(BATTLE_LUA_PATH)
+	if b_result is LuaError:
+		failed.append(BATTLE_LUA_PATH)
 	else:
-		_track_file(file_path)
-		lua_reloaded.emit(file_path)
-		print("[LuaRuntime] 重载成功: %s" % file_path)
+		_track_file(BATTLE_LUA_PATH)
+
+	_func_cache.clear()
+	if failed.is_empty():
+		lua_reloaded.emit("all")
+		print("[LuaRuntime] 热重载成功")
+	else:
+		print("[LuaRuntime] 热重载完成（%d 个模块失败，保留旧逻辑）" % failed.size())
 
 
 func check_and_reload() -> void:
@@ -246,137 +135,75 @@ func check_and_reload() -> void:
 			continue
 		var mtime = FileAccess.get_modified_time(abs_path)
 		if mtime != _loaded_files[file_path]:
-			reload(file_path)
+			reload()
+			return
 
 
 # ==============================================
-# 卡牌效果执行
+# 卡牌效果计算（纯函数：Lua 只算不写）
 # ==============================================
 
+## 计算 card_id 的效果清单。ctx 由 GDScript 打包（含全部所需只读数据）。
+## execute 与 preview 共用本函数——Lua 无副作用，预览即真值。
 func execute_card(card_id: String, ctx: Dictionary) -> Dictionary:
 	if not enabled or not _ready_flag:
 		return {}
 
 	var card_effects = _lua.globals["CardEffects"]
-	if card_effects == null:
+	if card_effects == null or card_effects is LuaError:
 		return {}
-	if card_effects is LuaError:
+	if card_effects[card_id] == null:
 		return {}
 
-	var func_ref = card_effects[card_id]
-	if func_ref == null:
-		return {}
+	var lua_func = _func_cache.get(card_id)
+	if lua_func == null:
+		var compiled = _lua.load_string("return CardEffects['" + card_id + "'](_G._call_ctx)")
+		if compiled is LuaError:
+			push_error("[LuaRuntime] 编译 %s 出错: %s" % [card_id, str(compiled)])
+			return {}
+		_func_cache[card_id] = compiled
+		lua_func = compiled
 
 	_lua.globals["_call_ctx"] = ctx
-
-	var lua_func = _lua.load_string("return CardEffects['" + card_id + "'](_G._call_ctx)")
-	if lua_func is LuaError:
-		push_error("[LuaRuntime] load_string 出错: %s" % str(lua_func))
-		return {}
-
 	var result = lua_func.invoke()
 	if result is LuaError:
 		push_error("[LuaRuntime] 执行卡牌 %s 出错: %s" % [card_id, str(result)])
 		return {}
 
-	if result is Dictionary:
-		return result
-
-	return {}
+	return result if result is Dictionary else {}
 
 
-## 预览卡牌效果（不执行副作用，只返回计算结果用于显示）
+## 旧接口兼容别名：预览 = 执行（纯函数化后两者完全一致）
 func preview_card(card_id: String, ctx: Dictionary) -> Dictionary:
 	return execute_card(card_id, ctx)
 
 
 # ==============================================
-# 敌人 AI 执行
+# POWER/回合逻辑（同样返回清单，由宿主执行）
 # ==============================================
 
-func enemy_plan_intent(ctx: Dictionary) -> Dictionary:
+## 每回合开始触发当前玩家的 POWER。返回触发清单。
+func battle_trigger_powers(ctx: Dictionary) -> Dictionary:
 	if not enabled or not _ready_flag:
 		return {}
-	var enemy_ai = _lua.globals["EnemyAI"]
-	if enemy_ai == null:
-		return {}
-
-	_lua.globals["_enemy_ctx"] = ctx
-	var lua_func = _lua.load_string("return EnemyAI.plan_intent(_G._enemy_ctx)")
-	if lua_func is LuaError:
-		push_error("[LuaRuntime] enemy plan_intent load 出错: %s" % str(lua_func))
-		return {}
-
-	var result = lua_func.invoke()
-	if result is LuaError:
-		push_error("[LuaRuntime] enemy plan_intent 出错: %s" % str(result))
-		return {}
-
-	if result is Dictionary:
-		return result
-	return {}
-
-
-func enemy_execute_intent(ctx: Dictionary) -> Dictionary:
-	if not enabled or not _ready_flag:
-		return {}
-	var enemy_ai = _lua.globals["EnemyAI"]
-	if enemy_ai == null:
-		return {}
-
-	_lua.globals["_enemy_ctx"] = ctx
-	var lua_func = _lua.load_string("return EnemyAI.execute_intent(_G._enemy_ctx)")
-	if lua_func is LuaError:
-		return {}
-
-	var result = lua_func.invoke()
-	if result is LuaError:
-		push_error("[LuaRuntime] enemy execute_intent 出错: %s" % str(result))
-		return {}
-
-	if result is Dictionary:
-		return result
-	return {}
-
-
-# ==============================================
-# POWER/回合逻辑执行
-# ==============================================
-
-func battle_trigger_powers(ctx: Dictionary) -> void:
-	if not enabled or not _ready_flag:
-		return
 	var battle = _lua.globals["Battle"]
-	if battle == null:
-		return
+	if battle == null or battle is LuaError:
+		return {}
+
+	var lua_func = _func_cache.get("__battle_powers")
+	if lua_func == null:
+		var compiled = _lua.load_string("return Battle.trigger_powers(_G._battle_ctx)")
+		if compiled is LuaError:
+			return {}
+		_func_cache["__battle_powers"] = compiled
+		lua_func = compiled
 
 	_lua.globals["_battle_ctx"] = ctx
-	var lua_func = _lua.load_string("return Battle.trigger_powers(_G._battle_ctx)")
-	if lua_func is LuaError:
-		return
 	var result = lua_func.invoke()
 	if result is LuaError:
 		push_error("[LuaRuntime] battle trigger_powers 出错: %s" % str(result))
-
-
-func battle_on_turn_start(ctx: Dictionary) -> Dictionary:
-	if not enabled or not _ready_flag:
 		return {}
-	var battle = _lua.globals["Battle"]
-	if battle == null:
-		return {}
-
-	_lua.globals["_battle_ctx"] = ctx
-	var lua_func = _lua.load_string("return Battle.on_turn_start(_G._battle_ctx)")
-	if lua_func is LuaError:
-		return {}
-	var result = lua_func.invoke()
-	if result is LuaError:
-		push_error("[LuaRuntime] battle on_turn_start 出错: %s" % str(result))
-		return {}
-	if result is Dictionary:
-		return result
-	return {}
+	return result if result is Dictionary else {}
 
 
 # ==============================================

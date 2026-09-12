@@ -1,0 +1,19 @@
+﻿Godot Engine v4.7.2.stable.steam.ed1daf0bf - https://godotengine.org
+
+[LuaRuntime] 已加载 res://lua/cards/basic.lua
+[LuaRuntime] 已加载 res://lua/cards/shaolin.lua
+[LuaRuntime] 已加载 res://lua/cards/wudang.lua
+[LuaRuntime] 已加载 res://lua/cards/xiaoyao.lua
+[LuaRuntime] 已加载 res://lua/cards/yunzhi.lua
+[LuaRuntime] 已加载 res://lua/battle.lua
+[LuaRuntime] 初始化完成：5 个卡牌模块 + battle.lua（自动热更: 每1秒检测，Ctrl+R 手动触发）
+godot.windows.opt.tools.64.exe : WARNING: 2 ObjectDB instances were leaked at exit (run with `--verbose` for details).
+At line:1 char:1
++ & "E:\steam\steamapps\common\Godot Engine\godot.windows.opt.tools.64. ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (WARNING: 2 Obje...` for details).:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   at: cleanup (core/object/object.cpp:2536)
+ERROR: 1 resources still in use at exit (run with --verbose for details).
+   at: clear (core/io/resource.cpp:822)

@@ -2,9 +2,15 @@ extends Node
 
 # ==============================
 # 局域网联机管理器（自动加载）
-# 主机：建服务器，发随机种子
-# 客机：连接主机，收随机种子
-# 核心：@rpc 同步打牌动作
+# 主机：建服务器，发随机种子；跑完整游戏逻辑
+# 客机：连接主机，收种子；纯渲染终端，只发输入请求
+#
+# 请求(客机→主机): request_play / request_end_turn / request_select_node /
+#                  request_reward_done / request_rest_done / request_event_done /
+#                  request_shop_buy / request_shop_delete / request_shop_done
+# 广播(主机→客机): sync_game_state(快照) / sync_select_node / sync_show_map /
+#                  sync_reward_open / sync_rest_open / sync_event_open /
+#                  sync_shop_open / sync_shop_update
 # ==============================
 
 const DEFAULT_PORT: int = 8080
@@ -33,23 +39,23 @@ var _timeout_timer: Timer = null
 func host_game(port: int = DEFAULT_PORT) -> bool:
 	if is_lan:
 		cleanup()
-	
+
 	var peer = ENetMultiplayerPeer.new()
 	var err = peer.create_server(port, MAX_PLAYERS)
 	if err != OK:
 		push_error("建服失败: %d" % err)
 		return false
-	
+
 	multiplayer.multiplayer_peer = peer
 	is_lan = true
 	is_host = true
 	shared_seed = randi()
-	
+
 	if not multiplayer.peer_connected.is_connected(_on_peer_connected):
 		multiplayer.peer_connected.connect(_on_peer_connected)
 	if not multiplayer.peer_disconnected.is_connected(_on_peer_disconnected):
 		multiplayer.peer_disconnected.connect(_on_peer_disconnected)
-	
+
 	print("[网络] 主机已开，种子=%d" % shared_seed)
 	return true
 
@@ -58,33 +64,35 @@ func join_game(ip: String, port: int = DEFAULT_PORT) -> bool:
 	# 防止重复连接
 	if is_lan:
 		cleanup()
-	
+
 	var peer = ENetMultiplayerPeer.new()
 	var err = peer.create_client(ip, port)
 	if err != OK:
 		push_error("连接失败: %d" % err)
 		return false
-	
+
 	multiplayer.multiplayer_peer = peer
 	is_lan = true
 	is_host = false
-	
+
 	if not multiplayer.connected_to_server.is_connected(_on_connected_to_server):
 		multiplayer.connected_to_server.connect(_on_connected_to_server)
-	
+
 	# ⏱ 连接超时
 	_start_timeout()
 	return true
 
 
 func cleanup():
-	"""断开连接，释放网络资源"""
+	"""断开连接，释放网络资源，复位会话标记"""
 	if multiplayer.multiplayer_peer:
 		multiplayer.multiplayer_peer.close()
 		multiplayer.multiplayer_peer = null
 	is_lan = false
 	is_host = false
 	p2_peer_id = 0
+	p2_reconnecting = false
+	host_in_select = false
 	_stop_timeout()
 	# 断开所有信号避免重复连接
 	if multiplayer.connected_to_server.is_connected(_on_connected_to_server):
@@ -108,7 +116,7 @@ func _on_peer_connected(id: int):
 	p2_peer_id = id
 	print("[网络] 玩家已连接 (ID=%d)" % id)
 	rpc_id(id, "_receive_seed", shared_seed)
-	
+
 	if is_host and host_in_select:
 		# 主机在选人界面：新游戏，通知客机也进选人
 		rpc_id(id, "sync_enter_select_school")
@@ -168,6 +176,7 @@ func request_p2_pick(p2_char: String, p2_school: String):
 func send_reconnect_data():
 	if not is_host or p2_peer_id == 0:
 		return
+	p2_reconnecting = false
 	# 同步角色和牌组
 	rpc_id(p2_peer_id, "sync_start_game",
 		GameData.selected_character,
@@ -208,12 +217,12 @@ func _on_timeout():
 
 
 # ==============================
-# RPC 同步函数
+# 参数校验
 # ==============================
 
-# ✅ 参数校验：player_id 只能是 1 或 2
 func _valid_player(pid: int) -> bool:
 	return pid == 1 or pid == 2
+
 
 func _valid_card(card_id: String) -> bool:
 	return card_id.length() > 0 and card_id.length() < 64
@@ -221,7 +230,6 @@ func _valid_card(card_id: String) -> bool:
 
 # ==============================
 # 客户端 → 主机（请求）
-# 客户端发起请求，只有主机处理
 # ==============================
 
 # 客机请求出牌
@@ -231,7 +239,6 @@ func request_play(card_id: String, player_id: int):
 		return  # 只有主机处理
 	if not _valid_player(player_id) or not _valid_card(card_id):
 		return
-	# 主机执行，然后广播
 	_safe_call("network_execute_play", [card_id, player_id])
 	push_snapshot()
 
@@ -247,20 +254,157 @@ func request_end_turn(player_id: int):
 	push_snapshot()
 
 
+# 客机请求选地图节点 → 主机执行并广播
+@rpc("any_peer", "reliable")
+func request_select_node(node_type: int):
+	if not is_host:
+		return
+	var main = get_tree().current_scene
+	if main and main.has_method("network_select_node"):
+		main.network_select_node(node_type)
+	push_snapshot()
+
+
+# 客机 → 主机：奖励选择完成
+@rpc("any_peer", "reliable")
+func request_reward_done(card_id: String):
+	if not is_host:
+		return
+	_safe_call("network_reward_done", [card_id])
+
+
+# 客机 → 主机：休息点选择完成（现客机不可交互，保留兼容）
+@rpc("any_peer", "reliable")
+func request_rest_done(next_action: String):
+	if not is_host:
+		return
+	_safe_call("network_rest_done", [next_action])
+
+
+# 客机 → 主机：事件选择完成
+@rpc("any_peer", "reliable")
+func request_event_done(event_id: String, action: String):
+	if not is_host:
+		return
+	_safe_call("network_event_done", [event_id, action])
+
+
+# 客机 → 主机：商店购买
+@rpc("any_peer", "reliable")
+func request_shop_buy(card_id: String, target_player: int):
+	if not is_host:
+		return
+	if not _valid_card(card_id) or not _valid_player(target_player):
+		return
+	_safe_call("network_shop_buy", [card_id, target_player])
+
+
+# 客机 → 主机：商店删牌
+@rpc("any_peer", "reliable")
+func request_shop_delete(card_id: String, target_player: int):
+	if not is_host:
+		return
+	if not _valid_card(card_id) or not _valid_player(target_player):
+		return
+	_safe_call("network_shop_delete", [card_id, target_player])
+
+
+# 客机 → 主机：商店逛完
+@rpc("any_peer", "reliable")
+func request_shop_done():
+	if not is_host:
+		return
+	_safe_call("network_shop_done", [])
+
+
 # ==============================
-# 主机 → 所有节点（广播）
-# 主机执行完，广播给所有人执行同样的逻辑
+# 主机 → 客机（广播）
 # ==============================
+
+# 地图节点同步（主机已直接执行，只通知客机）
+@rpc("authority", "reliable")
+func sync_select_node(node_type: int):
+	var main = get_tree().current_scene
+	if main and main.has_method("network_select_node"):
+		main.network_select_node(node_type)
+
+
+# 主机选完角色，同步角色和牌组给客机
+@rpc("authority", "reliable")
+func sync_start_game(p1_char: String, p2_char: String, p1_deck: Array, p2_deck: Array):
+	GameData.new_dual_run()
+	GameData.selected_character = p1_char
+	GameData.selected_character_2 = p2_char
+	GameData.player_deck = p1_deck.duplicate()
+	GameData.player2_deck = p2_deck.duplicate()
+	game_start_ready.emit()
+
+
+# 奖励界面
+@rpc("authority", "reliable")
+func sync_reward_open(options: Array):
+	_safe_call("network_reward_open", [options])
+
+
+# 显示地图
+@rpc("authority", "reliable")
+func sync_show_map():
+	_safe_call("network_show_map", [])
+
+
+# 休息点：同步双方血量与金币后打开
+@rpc("authority", "reliable")
+func sync_rest_open(p1_hp: int, p2_hp: int, gold: int):
+	_safe_call("network_rest_open", [p1_hp, p2_hp, gold])
+
+
+# 事件：同步事件内容（两端一致，谁先选谁算）
+@rpc("authority", "reliable")
+func sync_event_open(event_data: Dictionary):
+	_safe_call("network_event_open", [event_data])
+
+
+# 商店：打开时同步库存
+@rpc("authority", "reliable")
+func sync_shop_open(stock: Array, sold: Array):
+	_safe_call("network_shop_open", [stock, sold])
+
+
+# 商店：购买/删牌后同步库存与金币
+@rpc("authority", "reliable")
+func sync_shop_update(stock: Array, sold: Array, gold: int):
+	_safe_call("network_shop_sync", [stock, sold, gold])
+
+
+# ==============================
+# 状态快照同步
+# ==============================
+
+func push_snapshot():
+	if not is_host:
+		return
+	var main = get_tree().current_scene
+	if not main or main.scene_file_path != "res://scenes/main.tscn":
+		return
+	if not main.has_method("apply_snapshot"):
+		return
+	var snap = GameStateSync.build_snapshot(main)
+	print("[主机] 推送快照: turn=%d p1_hand=%d p2_hand=%d gold=%d" % [
+		snap.get("turn", -1), snap.get("p1_hand_ids", []).size(),
+		snap.get("p2_hand_ids", []).size(), snap.get("gold", 0)])
+	rpc("sync_game_state", snap)
+
 
 @rpc("authority", "reliable")
-func sync_play(card_id: String, player_id: int):
-	_safe_call("network_execute_play", [card_id, player_id])
+func sync_game_state(state: Dictionary):
+	var main = get_tree().current_scene
+	if main and main.has_method("apply_snapshot"):
+		main.apply_snapshot(state)
 
 
-@rpc("authority", "reliable")
-func sync_end_turn(player_id: int):
-	_safe_call("network_execute_end_turn", [player_id])
-
+# ==============================
+# 场景树方法分派
+# ==============================
 
 func _safe_call(method: String, args: Array):
 	var main = get_tree().current_scene
@@ -284,123 +428,3 @@ func _search_and_call(node: Node, method: String, args: Array) -> bool:
 		if _search_and_call(child, method, args):
 			return true
 	return false
-
-
-# 地图节点同步
-# 主机 → 客机：广播选节点结果（不 call_local，主机已直接执行）
-@rpc("authority", "reliable")
-func sync_select_node(node_type: int):
-	var main = get_tree().current_scene
-	if main and main.has_method("network_select_node"):
-		main.network_select_node(node_type)
-
-
-# 客机请求选节点 → 主机执行并广播
-@rpc("any_peer", "reliable")
-func request_select_node(node_type: int):
-	if not is_host:
-		return
-	var main = get_tree().current_scene
-	if main and main.has_method("network_select_node"):
-		main.network_select_node(node_type)
-	push_snapshot()
-
-
-# 主机选完角色，同步角色和牌组给客机
-@rpc("authority", "reliable")
-func sync_start_game(p1_char: String, p2_char: String, p1_deck: Array, p2_deck: Array):
-	# 先重置所有数据（new_dual_run 会覆盖 deck 所以后设）
-	GameData.new_dual_run()
-	# 再覆盖成主机发来的数据
-	GameData.selected_character = p1_char
-	GameData.selected_character_2 = p2_char
-	GameData.player_deck = p1_deck.duplicate()
-	GameData.player2_deck = p2_deck.duplicate()
-	game_start_ready.emit()
-
-
-# 主机通知客机：回合变了，执行对应阶段的动作
-@rpc("authority", "reliable")
-func sync_turn(turn_id: int):
-	var main = get_tree().current_scene
-	if not main or not main.has_method("network_sync_turn"):
-		return
-	main.network_sync_turn(turn_id)
-
-# ==============================
-# 奖励/地图同步
-# ==============================
-
-# 主机 → 客机：开奖励界面
-@rpc("authority", "reliable")
-func sync_reward_open(options: Array):
-	var main = get_tree().current_scene
-	if main and main.has_method("network_reward_open"):
-		main.network_reward_open(options)
-
-# 主机 → 客机：显示地图
-@rpc("authority", "reliable")
-func sync_show_map():
-	var main = get_tree().current_scene
-	if main and main.has_method("network_show_map"):
-		main.network_show_map()
-
-# 客机 → 主机：奖励选择完成
-@rpc("any_peer", "reliable")
-func request_reward_done(card_id: String):
-	if not is_host:
-		return
-	var main = get_tree().current_scene
-	if main and main.has_method("network_reward_done"):
-		main.network_reward_done(card_id)
-
-# 客机 → 主机：休息点选择完成
-@rpc("any_peer", "reliable")
-func request_rest_done(next_action: String):
-	if not is_host:
-		return
-	var main = get_tree().current_scene
-	if main and main.has_method("network_rest_done"):
-		main.network_rest_done(next_action)
-
-# 客机 → 主机：事件选择完成
-@rpc("any_peer", "reliable")
-func request_event_done(event_id: String, action: String):
-	if not is_host:
-		return
-	var main = get_tree().current_scene
-	if main and main.has_method("network_event_done"):
-		main.network_event_done(event_id, action)
-
-# 客机 → 主机：商店完成
-@rpc("any_peer", "reliable")
-func request_shop_done():
-	if not is_host:
-		return
-	var main = get_tree().current_scene
-	if main and main.has_method("network_shop_done"):
-		main.network_shop_done()
-
-
-# ==============================
-# 状态快照同步
-# ==============================
-
-func push_snapshot():
-	if not is_host:
-		return
-	var main = get_tree().current_scene
-	if not main or main.scene_file_path != "res://scenes/main.tscn":
-		return
-	if not main.has_method("apply_snapshot"):
-		return
-	var snap = GameStateSync.build_snapshot(main)
-	print("[主机] 推送快照: turn=%d p1_hand=%d p2_hand=%d" % [snap.get("turn", -1), snap.get("p1_hand_ids", []).size(), snap.get("p2_hand_ids", []).size()])
-	rpc("sync_game_state", snap)
-
-
-@rpc("authority", "reliable")
-func sync_game_state(state: Dictionary):
-	var main = get_tree().current_scene
-	if main and main.has_method("apply_snapshot"):
-		main.apply_snapshot(state)

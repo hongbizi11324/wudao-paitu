@@ -8,11 +8,15 @@ extends Node2D
 
 # --- 可调参数（在编辑器Inspector中调整） ---
 
-@export_range(1, 20) var max_hand_size: int = 10     # 手牌上限，超过触发 hand_full
+@export_range(1, 20) var base_hand_size: int = 10   # 基础手牌上限
 @export var card_width: float = 120.0                # 卡牌宽度（影响间距计算）
 @export var arc_radius: float = 500.0                # 扇形半径（越大弧越平）450左右
 @export var max_fan_angle: float = 30.0              # 扇形总角度（度），60°=适中
 @export var hover_lift: float = -80.0                # 悬停/选中时上浮高度（负=向上）
+
+# 运行时手牌上限 = base_hand_size + limit_mod（逍遥游等 POWER 用）
+var limit_mod: int = 0
+var max_hand_size: int = 10
 
 # --- 信号 ---
 
@@ -31,6 +35,16 @@ var _tween: Tween               # 排列动画控制器
 const DIM_ALPHA: float = 0.7    # 非活跃卡牌的透明系数
 
 
+func _ready() -> void:
+	max_hand_size = base_hand_size
+
+
+## 应用手牌上限增量（逍遥游 +2 等）。负数则回收减量。
+func apply_limit_mod(mod: int) -> void:
+	limit_mod = mod
+	max_hand_size = base_hand_size + limit_mod
+
+
 # ==============================
 # 卡牌增删
 # ==============================
@@ -40,11 +54,13 @@ func add_card(card) -> bool:
 	if cards.size() >= max_hand_size:
 		hand_full.emit()
 		return false
-	# 连接悬停信号（避免重复连接）
-	if not card.mouse_entered.is_connected(_on_hover_start):
+	# 连接悬停/点击信号——用绑定后的 Callable 做重复连接检查
+	# （旧代码检查的是未绑定 Callable，恒为 false，形同虚设）
+	if not card.mouse_entered.is_connected(_on_hover_start.bind(card)):
 		card.mouse_entered.connect(_on_hover_start.bind(card))
 		card.mouse_exited.connect(_on_hover_end.bind(card))
-	card.clicked.connect(_on_card_clicked.bind(card))
+	if not card.clicked.is_connected(_on_card_clicked.bind(card)):
+		card.clicked.connect(_on_card_clicked.bind(card))
 	cards.append(card)
 	add_child(card)
 	_rearrange()
@@ -86,7 +102,7 @@ func _rearrange():
 
 	var angle_step = 0.0
 	if count > 1: angle_step = max_fan_angle / (count - 1)    # 相邻卡牌的角度间隔
-	var start_angle = -max_fan_angle / 1.5                    # 最左边卡牌的角度
+	var start_angle = -max_fan_angle / 2.0                    # 最左边卡牌的角度（与 _update_states 统一，修复布局跳动）
 
 	for i in range(count):
 		var card = cards[i]
