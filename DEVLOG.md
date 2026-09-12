@@ -2,6 +2,89 @@
 
 ---
 
+## 2026-09-12 大修：12+ 核心 bug 修复 + 架构重置（Lua Command Pattern）
+
+### 背景
+
+对全项目做了系统性摸底（通读全部核心脚本 + 无头导入扫描 + 场景核对），
+修复了所有确认的 bug，并把出牌逻辑从「三套并行系统」收敛为单一 Command Pattern 路径。
+
+### 修复的核心 bug
+
+| # | Bug | 根因 | 修复 |
+|---|-----|------|------|
+| 1 | Boss 战永远打不出来 | `select_map_node` 已设楼层，`_do_select_node` 又调 `advance_floor()` 双推进 | 楼层推进唯一入口=地图选点，删除 advance_floor |
+| 2 | 双人模式敌人只打 P1 | `execute_enemy_turn(player1)` 写死 | 敌人用宿主权威 RNG 从存活玩家随机选目标；Boss 楼层只保留唯一战斗节点 |
+| 3 | P2 掉血写坏 P1 存档血量 | `take_damage` 无条件写 `GameData.player_hp` | Player 带 `is_p2`，分别同步 player/player2 字段 |
+| 4 | 联机客机永远无法结束回合 | 客机无 turn_manager，`_on_end_turn` 判空直接 return | LAN 客机分支前置，先发 `request_end_turn` 再判空 |
+| 5 | 太极两仪被动一回合后失效 | Lua 里 `host` 全局从未绑定恒为 nil，`if host and ...` 静默跳过 | Command Pattern 后 Lua 为纯函数，彻底根除 |
+| 6 | 断水流/万象归一/袖里乾坤把自己也弃掉 | Lua 写回调直接操作手牌节点，不排除打出牌 | 结果清单改由执行器结算，手牌操作强制排除打出牌 |
+| 7 | 出牌失败吞折扣 | `next_card_discount` 在 `spend_energy` 校验前清零 | `_calc_card_cost` 统一算费，成功后才消耗 |
+| 8 | 逍遥游"手牌上限+2"是空话 | `hand_limit_mod` 从未接入 Hand | `Hand.apply_limit_mod()`，回合开始按玩家应用 |
+| 9 | 商店买/删一次整体刷新进货 | 买/删后调用 `_restock()` | 售罄制：买走的槽位标记已售出 |
+| 10 | 双人模式 P2 的 POWER 不触发 | `_trigger_power_effects` 只跑当前别名玩家 | 回合开始按玩家逐一结算 |
+| 11 | 三个英雄被动是"宣传诈骗" | 描述存在、代码不存在 | 六英雄被动全部落地（慧明/林风/云芷/墨瑶/玄翁/夜啸） |
+| 12 | 客机手牌 diff 节点泄漏 | `_diff_hand` 移除卡不回池 | `CardPool.release()` |
+| 13 | 地图返回按钮重复叠加 | `node_map.open()` 每次新建按钮 | 只创建一次 |
+| 14 | 奖励数值与地图提示不符 | 悬停提示"精英20/20"实给 10/12 | `get_battle_reward()` 按楼层类型缩放 |
+
+### 架构重置（Command Pattern）
+
+```
+旧（三套并行，互相漂移）：
+  _execute_card 700行 match 分支  +  cards.lua 边算边写 gd_* 回调  +  EffectResource 效果系统
+  └─ Lua 报错 → 半截状态 → 20+字段事务快照 → 回滚（有视觉残留风险）
+
+新（单一路径）：
+  _calc_card_cost 统一算费
+    → Lua 纯函数（只读 ctx）算「结果清单」Dictionary
+    → CardExecutor.apply() 原子执行
+    → Lua 报错 → 清单没返回 → 什么都不执行 → 状态天然干净（无需快照/回滚/沙箱）
+    → Lua 整体不可用 → _fallback_result 通用数值结算兜底
+```
+
+- **lua/cards/** 按门派拆 5 个模块（basic/shaolin/wudang/xiaoyao/yunzhi），按序加载、按序热重载
+- **LuaFunction 编译缓存**：每卡只 load_string 一次，热重载清缓存
+- **预览 = 出牌**：同一份纯函数，预览零副作用（旧沙箱/守卫层整体删除）
+- **回合追踪按玩家分开**（`_track[1]/_track[2]`），共享回合下 P1/P2 互不污染
+- **效果系统（EffectResource 全套 12 个类 + 16 张卡的 effects 数组）整体移除**
+- 删除死代码：enemy_ai.lua、sync_turn/sync_play/sync_end_turn RPC、main_backup.gd、autoload 空文件等
+
+### 联机补齐
+
+- 商店：库存由主机生成并同步（sync_shop_open/update），客机购买/删牌请求转发主机结算，双人可选买入/删除哪个牌组
+- 事件：主机生成后广播事件内容（两端一致，谁先选谁算，`_node_result_done` 防双推）
+- 休息：主机选择（客机只展示），治疗全队
+- 奖励：主机(P1)与客机(P2)各自选完再开地图；同屏双人 P1 选完轮到 P2
+- 快照补充 realm/gold/cultivation/chan/jianyi → 客机预览数值与商店金币不再漂移
+
+### 玩法成熟化
+
+- 六英雄被动落地：慧明（禅意回血）/ 林风（剑意加伤）/ 云芷（首牌减费）/ 墨瑶（第2张攻击+2）/ 玄翁（首击格挡+2）/ 夜啸（低血多抽）
+- 奖励/商店卡池按门派过滤（不再把别派卡塞给玩家）
+- 敌人数值曲线调优：1.2→1.15 复合增长，Boss ×2.5→×2.2（旧曲线 12 层 Boss 466HP 拖成消耗战）
+- Boss 战专属背景 + 立绘（AI 生成水墨素材，每 6 层镇关Boss 一眼识别）
+- 卡牌预览显示折扣后实际费用，内力不足费用标红
+- 测试模式可选全量 58 张卡
+
+### 测试基建
+
+新增无头测试套件 `tests/test_boot.tscn`（`godot --headless --path . res://tests/test_boot.tscn`）：
+- TestTurnManager：状态机推进/共享回合/非法输入/联机注入
+- TestGameData：楼层类型/奖励/地图生成不变量/门派卡池/存档回环（自动备份恢复用户存档）
+- TestCardExecutor：数值结算/六被动/手牌操作排除打出牌/牌库回收/POWER触发
+- TestLuaCards：58 卡 Lua 纯函数语义（条件分支/门派资源/复制类）
+- TestBattleIntegration：真实 main.tscn 场景跑完整回合循环（抽牌→出牌→守恒→结束→敌人回合→再抽）
+- 全部通过 ✅
+
+### 踩坑新记录（详见 错误总结.md）
+
+- PowerShell `Set-Content -Encoding utf8` 给 .tres 写入 BOM → Godot 解析 `Expected '['`（用 WriteAllBytes 去头）
+- 新建 class_name 必须先 `--headless --import` 刷新全局类缓存，否则引用它的脚本解析失败
+- 场景 `_ready` 期间往 root add_child 会报 "Parent node is busy"，用业务节点做父级
+
+---
+
 ## 2026-07-06 Lua 热更 PoC
 
 ### 完成的工作

@@ -103,7 +103,7 @@ func _setup_target_toggle():
 
 	_target_btn_p1 = Button.new()
 	_target_btn_p1.text = "P1牌组"
-	_target_btn_p1.position = Vector2(490, 14)
+	_target_btn_p1.position = Vector2(930, 16)
 	_target_btn_p1.size = Vector2(90, 30)
 	_target_btn_p1.add_theme_font_size_override("font_size", 13)
 	_target_btn_p1.pressed.connect(func(): _set_target(1))
@@ -111,7 +111,7 @@ func _setup_target_toggle():
 
 	_target_btn_p2 = Button.new()
 	_target_btn_p2.text = "P2牌组"
-	_target_btn_p2.position = Vector2(588, 14)
+	_target_btn_p2.position = Vector2(1028, 16)
 	_target_btn_p2.size = Vector2(90, 30)
 	_target_btn_p2.add_theme_font_size_override("font_size", 13)
 	_target_btn_p2.pressed.connect(func(): _set_target(2))

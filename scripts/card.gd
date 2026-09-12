@@ -58,14 +58,15 @@ func _refresh_display():
 			$TypeOverlay.color = Color(0.3, 0.2, 0.3, 0.2)
 
 
-## 用 Lua 预览实际效果，更新描述显示
+## 用 Lua 预览实际效果，更新描述与实际费用显示
 func update_preview(ctx: Dictionary):
 	if not card_data:
 		return
+	_update_cost_display(ctx)
 	if not LuaRuntime or not LuaRuntime.enabled:
 		_refresh_display()
 		return
-	
+
 	# 把卡牌自身数据合并进 ctx
 	var full_ctx = ctx.duplicate()
 	full_ctx["card_id"] = card_data.card_id
@@ -79,15 +80,15 @@ func update_preview(ctx: Dictionary):
 	full_ctx["repeat"] = card_data.repeat
 	full_ctx["armor_break"] = card_data.armor_break
 	full_ctx["school"] = card_data.school
-	
+
 	var result = LuaRuntime.preview_card(card_data.card_id, full_ctx)
 	if result.is_empty():
 		_refresh_display()
 		return
-	
+
 	# 基础描述
 	var desc = card_data.description
-	
+
 	# 构建预览数值后缀
 	var parts = []
 	var dmg = int(result.get("damage", 0))
@@ -96,7 +97,7 @@ func update_preview(ctx: Dictionary):
 	var draw = int(result.get("draw", 0))
 	var eg = int(result.get("energy_gain", 0))
 	var rpt = int(result.get("repeat_count", 1))
-	
+
 	if dmg > 0:
 		var s = "伤害%d" % dmg
 		if rpt > 1: s += "×%d" % rpt
@@ -105,11 +106,37 @@ func update_preview(ctx: Dictionary):
 	if heal_amt > 0: parts.append("回血%d" % heal_amt)
 	if draw > 0: parts.append("抽%d" % draw)
 	if eg > 0: parts.append("内力+%d" % eg)
-	
+
 	if parts.size() > 0:
 		$DescLabel.text = desc + "\n[实际: " + ", ".join(parts) + "]"
 	else:
 		$DescLabel.text = desc
+
+
+## 显示打折后的实际费用；内力不足时费用标红
+func _update_cost_display(ctx: Dictionary):
+	if not card_data:
+		return
+	var shown_cost: int = card_data.cost
+	# 逍遥游 POWER：攻击/内力牌 -1
+	if ctx.get("player_attack_discounted", false) \
+			and (card_data.card_type == CardData.CardType.ATTACK or card_data.card_type == CardData.CardType.INNER):
+		shown_cost = max(0, shown_cost - 1)
+	# 虚实相生
+	var two: int = int(ctx.get("next_two_discount", 0))
+	if two > 0:
+		shown_cost = max(0, shown_cost - two)
+	# 云芷被动：每回合第一次出牌 -1
+	if ctx.get("player_character", "") == "yunzhi" \
+			and int(ctx.get("cards_played_this_turn", 0)) == 0 and shown_cost > 0:
+		shown_cost = max(0, shown_cost - 1)
+
+	$CostLabel.text = "%d" % shown_cost
+	# 内力不足 → 红色警示
+	if shown_cost > int(ctx.get("player_energy", 99)):
+		$CostLabel.add_theme_color_override("font_color", Color(0.95, 0.25, 0.25, 1))
+	else:
+		$CostLabel.add_theme_color_override("font_color", Color(1, 0.85, 0.2, 1))
 
 
 func _gui_input(event):

@@ -6,18 +6,8 @@ extends CanvasLayer
 
 const MAX_SELECT: int = 10
 
-# 所有可选卡牌
-var all_cards = [
-	"punch", "meditate", "light_step",
-	"double_strike", "tactics", "iron_wall", "vigor", "whirlwind",
-	"flowing_cloud_sword", "triple_stab", "sword_energy",
-	"iron_shirt", "vajra_fist", "golden_bell",
-	"strike", "defend", "bash", "heal",
-	# ---- 门派卡 ----
-	"sl_fist", "sl_iron", "sl_golden", "sl_arhat", "sl_damo",
-	"wd_taiji", "wd_soft", "wd_steps", "wd_heavy", "wd_twoway",
-	"xy_beiming", "xy_lingbo", "xy_wuxiang", "xy_zhemel", "xy_bahuang"
-]
+# 所有可选卡牌（全量卡池，含各门派卡）
+var all_cards: Array = []
 
 var selected: Array = []
 
@@ -30,6 +20,7 @@ var selected: Array = []
 
 
 func _ready():
+	all_cards = GameData.all_card_pool.duplicate()
 	back_btn.pressed.connect(_on_back)
 	start_btn.pressed.connect(_on_start)
 	start_btn.disabled = true

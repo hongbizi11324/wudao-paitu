@@ -79,20 +79,23 @@ func get_floor_type() -> FloorType:
 	return _calc_floor_type(current_floor)
 
 
+## 敌人数值曲线（1.15 复合增长 + 类型系数）：
+## 普通层 floor10 ≈ 88 HP（4~5回合）、精英 ×1.4、Boss ×2.2
+## 旧曲线 1.2+Boss2.5 会让第12层 Boss 高达 466 HP，拖成消耗战
 func get_enemy_hp() -> int:
-	var multiplier = pow(1.2, current_floor - 1)
+	var multiplier = pow(1.15, current_floor - 1)
 	var base_hp = ceili(25 * multiplier)
 	match _calc_floor_type(current_floor):
 		FloorType.ELITE:
-			return ceili(base_hp * 1.5)
+			return ceili(base_hp * 1.4)
 		FloorType.BOSS:
-			return ceili(base_hp * 2.5)
+			return ceili(base_hp * 2.2)
 		_:
 			return base_hp
 
 
 func get_enemy_damage_range() -> Array:
-	var multiplier = pow(1.2, current_floor - 1)
+	var multiplier = pow(1.15, current_floor - 1)
 	var dmg_min = maxi(1, ceili(3 * multiplier))
 	var dmg_max = maxi(2, ceili(6 * multiplier))
 	match _calc_floor_type(current_floor):

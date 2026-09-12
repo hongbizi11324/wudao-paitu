@@ -13,37 +13,38 @@
 
 ```
 project.godot           工程配置
-scripts/                GDScript 游戏逻辑
-  card.gd / card_data.gd    卡牌实体与数据
-  hand.gd / pile_viewer.gd  手牌与牌堆查看
-  turn_manager.gd           回合管理
-  player.gd / enemy.gd      角色逻辑
-  game_manager.gd           全局流程
-  start / select_school / shop / rest / reward / event_screen.gd   各界面
-  tests/ tools/             测试与工具
+scripts/                GDScript 宿主层
+  main.gd               主场景：回合流转 / 出牌调度 / 联机回调 / UI
+  card_executor.gd      ★ CardExecutor：出牌结算唯一执行入口（Command Pattern）
+  turn_manager.gd       回合状态机（双人共享回合）
+  player.gd / enemy.gd  角色与敌人数据（含六英雄被动、意图系统、Boss三阶段）
+  hand.gd / card.gd     手牌扇形布局 / 卡牌画面（预览实际数值+折扣费用）
+  start / select_school / shop / rest / reward / event_screen.gd  各界面
+  tests/                无头测试套件
 autoload/               全局单例（AutoLoad）
-  game_data.gd         全局数据 / 存档
-  game_state_sync.gd   状态同步
-  card_pool.gd         卡池
-  network_manager.gd   网络管理
-  lua_runtime.gd       Lua 运行时
-  bgm_manager.gd       音乐管理
-lua/                   Lua 脚本（玩法逻辑 / 热更新）
-  battle.lua cards.lua enemy_ai.lua
+  game_data.gd          全局数据 / 地图生成 / 存档 / 门派卡池
+  game_state_sync.gd    联机快照构建
+  network_manager.gd    网络管理（请求→执行→广播 + 非战斗节点同步）
+  card_pool.gd          卡牌对象池
+  lua_runtime.gd        Lua 桥接层（模块化加载 / 编译缓存 / 热重载）
+  bgm_manager.gd        音乐管理
+lua/                    Lua 热更层（纯函数：只读 ctx，返回结果清单）
+  cards/                按门派拆分：basic / shaolin / wudang / xiaoyao / yunzhi
+  battle.lua            POWER 回合触发
 addons/lua-gdextension/   Lua 集成插件
 mcp-server.js          AI 开发辅助服务端（MCP）
 ```
 
 ## 技术亮点
 
-- **Lua 热更新**：集成 `lua-gdextension`，项目侧实现 `LuaRuntime`、GDScript↔Lua 调用约定、热重载与回退机制，玩法逻辑可用 Lua 热更迭代。
-- **对象池**：卡牌、特效等频繁创建销毁的对象走对象池复用，降低实例化开销与 GC 压力。
-- **UI 节点复用与优化**：Control 节点按需复用，减少冗余绘制与重建。
-- **Lua GC 调优**：针对 Lua 增量 GC 做参数调优，缓解长帧卡顿。
-- **双人联机（原型）**：基于主机权威的局域网联机；战斗节点同步已跑通，**非战斗节点同步、断线重连仍在迭代**。
-- **AI 辅助开发**：通过 MCP 服务 + AI 智能体提示词，构建开发辅助流程。
+- **Lua Command Pattern 热更新**：卡牌效果是纯函数——Lua 只读上下文、返回「结果清单」，由 GDScript 侧 `CardExecutor` 原子执行。Lua 报错则清单不返回、状态零污染，无需事务快照/回滚/沙箱；预览与出牌共用同一份逻辑。
+- **单一路径多级兜底**：Lua → GDScript 通用结算，卡牌逻辑只有 `lua/cards/` 一份事实来源。
+- **对象池**：卡牌节点走对象池复用，回收时重置信号连接与数据。
+- **双人联机（原型）**：主机权威 + 全量快照；商店/事件/休息非战斗节点已同步；断线重连仍在迭代。
+- **AI 辅助开发**：MCP 服务 + AI 智能体工作流，素材（Boss 背景/立绘）由 AI 生成。
+- **无头测试**：`godot --headless res://tests/test_boot.tscn` 跑回合机/数据/结算器/Lua/真实战斗集成五套测试。
 
-> 诚实声明：本项目为个人学习 / 面试作品，核心系统已实现，整体仍在持续完善中。
+> 诚实声明：本项目为个人学习 / 面试作品，核心系统已实现并有测试覆盖，整体仍在持续完善中。
 
 ## 怎么跑
 
@@ -52,6 +53,7 @@ mcp-server.js          AI 开发辅助服务端（MCP）
 3. 在 `Project Settings → Plugins` 中启用 `lua-gdextension` 插件。
 4. 按 **F5** 运行；主菜单选择模式进入。
 5. 联机：一端「创建房间」（主机），另一端输入主机 IP「加入」。
+6. 测试：`godot --headless --path . res://tests/test_boot.tscn`（退出码 0=全部通过）。
 
 ## 目录约定
 

@@ -114,14 +114,16 @@ func _build_ui():
 
 func open():
 	visible = true
-	
-	# 退出按钮（角落常显）
-	var back_btn = Button.new()
-	back_btn.text = "✕"
-	back_btn.size = Vector2(36, 36)
-	back_btn.position = Vector2(10, 10)
-	back_btn.pressed.connect(_on_back_to_menu)
-	add_child(back_btn)
+
+	# 退出按钮（只创建一次，重复 open 不再叠加）
+	if not get_node_or_null("BackBtn"):
+		var back_btn = Button.new()
+		back_btn.name = "BackBtn"
+		back_btn.text = "✕"
+		back_btn.size = Vector2(36, 36)
+		back_btn.position = Vector2(10, 10)
+		back_btn.pressed.connect(_on_back_to_menu)
+		add_child(back_btn)
 	
 	if not GameData.map_active:
 		GameData.generate_new_act()

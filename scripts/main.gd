@@ -159,24 +159,21 @@ const BIOME_ENEMIES = {
 	GameData.Biome.FOREST: {
 		"normal": ["山匪", "强盗"],
 		"elite": ["老虎", "熊"],
-		"boss": ["山寨头领"],
 	},
 	GameData.Biome.VILLAGE: {
 		"normal": ["流民", "顽童"],
 		"elite": ["官兵", "门派弟子"],
-		"boss": ["丐帮掌门"],
 	},
 	GameData.Biome.GOV_OFFICE: {
 		"normal": ["官兵", "门派弟子"],
 		"elite": ["门派弟子·女"],
-		"boss": ["官兵统领", "少林掌门"],
 	},
 	GameData.Biome.SECT: {
 		"normal": ["门派弟子", "门派弟子·女"],
 		"elite": ["门派长老"],
-		"boss": ["武当掌门"],
 	},
 }
+# Boss 战使用专属 boss_bg.png / boss_lord.png（每6层的镇关Boss）
 
 @onready var _battle_bg: TextureRect = $BattleBg
 
@@ -637,6 +634,10 @@ func _build_state_ctx(pid: int, actual_cost: int = 0) -> Dictionary:
 		# 手牌/弃牌
 		"hand_size": _hand_node(pid).cards.size(),
 		"discard_csv": ",".join(PackedStringArray(dc)),
+		# 折扣信息（卡牌预览显示实际费用用）
+		"player_attack_discounted": p.attack_discounted,
+		"next_two_discount": t.get("next_two_discount", 0),
+		"player_character": p.character_id,
 		# 回合追踪
 		"last_played_card_id": t.get("last_id", ""),
 		"last_played_card_type": t.get("last_type", -1),
@@ -1136,6 +1137,15 @@ func _start_battle():
 	var ft_names = ["普通", "精英", "Boss"]
 	enemy.init_from_floor(GameData.current_floor, ft)
 
+	# Boss 战（含大关中段Boss）：专属背景 + 立绘，一眼识别
+	if ft == GameData.FloorType.BOSS:
+		_battle_bg.texture = load("res://assets/images/backgrounds/boss_bg.png")
+		enemy_portrait.texture = load("res://assets/images/enemies/boss_lord.png")
+		print("敌人: 武道盟主（镇关Boss）")
+		_update_floor_label()
+		print("===== 第 %d 层 · %s战 =====" % [GameData.current_floor, ft_names[ft]])
+		return
+
 	# 设置背景图
 	var bg_tex = BIOME_BG.get(GameData.current_biome)
 	if bg_tex:
@@ -1143,7 +1153,7 @@ func _start_battle():
 
 	# 从当前生态的敌人池里按楼层选一个（两端一致）
 	var pool = BIOME_ENEMIES.get(GameData.current_biome, {})
-	var key = "boss" if ft == GameData.FloorType.BOSS else ("elite" if ft == GameData.FloorType.ELITE else "normal")
+	var key = "elite" if ft == GameData.FloorType.ELITE else "normal"
 	var candidates = pool.get(key, ["山匪"])
 	if candidates.size() > 0:
 		var idx = GameData.current_floor % candidates.size()

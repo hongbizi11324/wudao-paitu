@@ -68,6 +68,16 @@ static func run(parent: Node) -> bool:
 	# ---------- 5. 敌人意图已刷新 ----------
 	TestBase.assert_true(scene.enemy.intent_value >= 0, "敌人意图已规划")
 
+	# ---------- 6. Boss 战（第6层镇关Boss）：专属背景与立绘 ----------
+	GameData.current_floor = 6
+	scene._reset_battle_state()
+	await tree.process_frame
+	TestBase.assert_eq(scene.enemy.floor_type, Enemy.FloorType.BOSS, "第6层为Boss战")
+	TestBase.assert_true(scene._battle_bg.texture != null, "Boss背景已加载")
+	TestBase.assert_true(scene.enemy_portrait.texture != null, "Boss立绘已加载")
+	TestBase.assert_true(scene.enemy.hp > 0, "Boss血量有效")
+	GameData.current_floor = 1
+
 	# 清理
 	scene.queue_free()
 	await tree.process_frame
