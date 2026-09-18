@@ -45,3 +45,13 @@ CardEffects.wd_twoway = function(ctx)
         set_power = "twoway",
     }
 end
+
+-- 三清剑：剑意≥2 时，额外抽1张并获得1内力
+CardEffects.wd_sanqing = function(ctx)
+    local r = H.base(ctx)
+    if ctx.player_jianyi >= 2 then
+        r["draw"] = (ctx.draw or 0) + 1
+        r["energy_gain"] = (ctx.energy_gain or 0) + 1
+    end
+    return r
+end

@@ -47,9 +47,15 @@ func float_text(pos: Vector2, text: String, color: Color = COLOR_INFO, font_size
 	label.add_theme_constant_override("outline_size", 3)
 	label.position = pos - Vector2(30, 10)
 	label.z_index = 100
+	label.pivot_offset = Vector2(30, 12)  # 围绕中心缩放
+	label.scale = Vector2(0.7, 0.7)
 	add_child(label)
 
+	# 弹出：0.7 → 1.15 → 1.0（带感），然后漂移淡出
 	var tw := create_tween()
+	tw.tween_property(label, "scale", Vector2(1.15, 1.15), 0.09) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(label, "scale", Vector2.ONE, 0.1)
 	tw.set_parallel(true)
 	tw.tween_property(label, "position:y", label.position.y - 48.0, 0.9) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
@@ -129,6 +135,37 @@ func card_flight(from: Vector2, to: Vector2, data: CardData = null) -> void:
 	tw.tween_property(card, "scale", Vector2(0.55, 0.55), 0.24)
 	tw.tween_property(card, "modulate:a", 0.5, 0.24)
 	tw.chain().tween_callback(card.queue_free)
+
+
+## 出牌后原卡缩小消失（填补"牌从手中消失"的视觉空档）
+func card_exit(from: Vector2, data: CardData = null) -> void:
+	var card_scene: PackedScene = load("res://scenes/card.tscn")
+	if card_scene == null:
+		return
+	var card: ColorRect = card_scene.instantiate()
+	card.size = Vector2(84, 126)
+	card.color = Color(0.95, 0.85, 0.5, 0.9)
+	add_child(card)
+	card.global_position = from - card.size / 2.0
+
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(card, "scale", Vector2(0.28, 0.28), 0.18)
+	tw.tween_property(card, "rotation", deg_to_rad(-16.0), 0.18)
+	tw.tween_property(card, "modulate:a", 0.0, 0.18)
+	tw.chain().tween_callback(card.queue_free)
+
+
+## 敌人死亡：下沉 + 旋转 + 淡出
+func enemy_death(node) -> void:
+	if not is_instance_valid(node):
+		return
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(node, "position:y", node.position.y + 34.0, 0.42) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_property(node, "rotation", deg_to_rad(-14.0), 0.42)
+	tw.tween_property(node, "modulate:a", 0.0, 0.42)
 
 
 # ====================================================================

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" uid="uid://bwf35mxdgdc2t" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "blood_exchange"
+card_name = "以血换气"
+card_type = 1
+cost = 0
+description = "失去3点生命，获得2点内力，抽1张牌"
+energy_gain = 2
+draw = 1

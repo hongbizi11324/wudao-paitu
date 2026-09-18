@@ -176,12 +176,24 @@ static func run(parent: Node) -> bool:
 	var ex12 := CardExecutor.new(sp, enemy5)
 	ex12.apply({"set_power": "twoway", "is_consumed": true})
 	TestBase.assert_true(sp.power_twoway, "set_power=twoway")
+	ex12.apply({"set_power": "bodhi", "is_consumed": true})
+	TestBase.assert_true(sp.power_bodhi, "set_power=bodhi")
+
+	# ---------- 15. hp_cost（以血换气：直接扣血不触发被动）----------
+	var hc := TestBase.make_player("xuanweng")  # 玄翁被动：首击格挡+2
+	hc.hp = 30
+	hc.block = 0
+	var enemy6 := TestBase.make_enemy()
+	var ex13 := CardExecutor.new(hc, enemy6)
+	ex13.apply({"hp_cost": 3, "energy_gain": 2, "draw": 1})
+	TestBase.assert_eq(hc.hp, 27, "hp_cost 扣3血")
+	TestBase.assert_eq(hc.block, 0, "hp_cost 不触发玄翁被动(直接扣血)")
 
 	# 清理
 	for h in [hand, hand2, hand3, hand4, hand5, hand6]:
 		h.clear()
 		h.queue_free()
-	for n in [player, enemy, huiming, linfeng, enemy2, moyao, enemy3, dragon, enemy4, p2, enemy5, p3, bhp, sp]:
+	for n in [player, enemy, huiming, linfeng, enemy2, moyao, enemy3, dragon, enemy4, p2, enemy5, p3, bhp, sp, hc, enemy6]:
 		TestBase.free_node(n)
 
 	return TestBase.failed == 0

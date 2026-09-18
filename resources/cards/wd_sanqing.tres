@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" uid="uid://bwf35mxdgdc2t" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "wd_sanqing"
+card_name = "三清剑"
+card_type = 0
+cost = 2
+description = "造成10点伤害。若剑意≥2，抽1张牌并获得1点内力"
+damage = 10
+school = wudang

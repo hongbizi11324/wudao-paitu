@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" uid="uid://bwf35mxdgdc2t" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "iron_skin"
+card_name = "铁肤"
+card_type = 1
+cost = 1
+description = "获得格挡。本回合第一张牌打出时，额外获得4点格挡"
+block = 6

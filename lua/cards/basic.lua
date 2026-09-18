@@ -122,3 +122,52 @@ end
 CardEffects.light_step = function(ctx)
     return base(ctx)
 end
+
+-- ---------- 新卡：通用 ----------
+
+-- 惊雷掌：敌人有护盾时伤害翻倍
+CardEffects.thunder_strike = function(ctx)
+    local r = base(ctx)
+    if ctx.enemy_block > 0 then
+        r["damage"] = r["damage"] * 2
+    end
+    return r
+end
+
+-- 铁肤：本回合第一张打出的牌，额外格挡
+CardEffects.iron_skin = function(ctx)
+    local r = base(ctx)
+    if ctx.cards_played_this_turn <= 1 then
+        r["block"] = r["block"] + 4
+    end
+    return r
+end
+
+-- 以血换气：失3血，得2内力，抽1张（0费）
+CardEffects.blood_exchange = function(ctx)
+    return Dictionary{
+        damage = 0, block = 0, heal = 0,
+        draw = (ctx.draw or 0) + 1,
+        energy_gain = (ctx.energy_gain or 0) + 2,
+        hp_cost = 3,
+        is_consumed = false,
+    }
+end
+
+-- 灵盾：格挡并抽1张
+CardEffects.spirit_guard = function(ctx)
+    return base(ctx)
+end
+
+-- 旋风斩：连击次数=弃牌堆数量（至多5）
+CardEffects.whirlwind_slash = function(ctx)
+    local r = base(ctx)
+    local discard_count = 0
+    if ctx.discard_csv and ctx.discard_csv ~= "" then
+        for _ in string.gmatch(ctx.discard_csv, "[^,]+") do
+            discard_count = discard_count + 1
+        end
+    end
+    r["repeat_count"] = math.max(1, math.min(5, discard_count))
+    return r
+end

@@ -104,6 +104,16 @@ func apply(result: Dictionary) -> void:
 	if heal_amt > 0:
 		player.heal(heal_amt)
 
+	# ---- 3.5 生命代价（如"以血换气"：直接扣血，不触发被动/死亡）----
+	var hp_cost: int = int(result.get("hp_cost", 0))
+	if hp_cost > 0:
+		player.hp = maxi(1, player.hp - hp_cost)
+		player.hp_changed.emit(player.hp, player.max_hp)
+		if player.is_p2:
+			GameData.player2_hp = player.hp
+		else:
+			GameData.player_hp = player.hp
+
 	# ---- 4. 内力（负数=消耗）----
 	if eg > 0:
 		player.gain_energy(eg)
@@ -262,6 +272,7 @@ func _set_power(power_name: String) -> void:
 		"bahuang": player.power_bahuang = true
 		"longxiang": player.power_longxiang = true
 		"xiaoyaoyou": player.power_xiaoyaoyou = true
+		"bodhi": player.power_bodhi = true
 		_:
 			push_warning("[CardExecutor] 未知 POWER: %s" % power_name)
 

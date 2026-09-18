@@ -64,3 +64,13 @@ CardEffects.xy_bahuang = function(ctx)
         set_power = "bahuang",
     }
 end
+
+-- 太虚步：抽2张；本回合未打出攻击牌 → 额外得1内力
+CardEffects.xy_taixu = function(ctx)
+    local r = H.base(ctx)
+    r["draw"] = (ctx.draw or 0) + 2
+    if ctx.attacks_played_this_turn == 0 then
+        r["energy_gain"] = (ctx.energy_gain or 0) + 1
+    end
+    return r
+end

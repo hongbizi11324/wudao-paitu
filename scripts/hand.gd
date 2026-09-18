@@ -162,7 +162,7 @@ func _update_states():
 	"""
 	刷新所有卡牌的视觉状态：
 	- 选中的卡 → 上浮 + 回正 + 放大 + 最前层
-	- 悬停仅变亮
+	- 悬停 → 轻微抬升 + 放大（手感：预选中反馈）
 	- 其余卡 → 回到扇形位置 + 变暗
 	"""
 	var count = cards.size()
@@ -183,12 +183,16 @@ func _update_states():
 		var is_hover = card == hovered_card
 
 		card.modulate.a = 1.0 if (is_hover or is_sel) else DIM_ALPHA
-		card.z_index = 100 if is_sel else i
+		card.z_index = 100 if is_sel else (50 if is_hover else i)
 
 		if is_sel:
 			_tween.tween_property(card, "position", base + Vector2(0, hover_lift), 0.15)
 			_tween.tween_property(card, "rotation", 0.0, 0.15)
 			_tween.tween_property(card, "scale", Vector2(1.15, 1.15), 0.15)
+		elif is_hover:
+			_tween.tween_property(card, "position", base + Vector2(0, hover_lift * 0.45), 0.12)
+			_tween.tween_property(card, "rotation", 0.0, 0.12)
+			_tween.tween_property(card, "scale", Vector2(1.06, 1.06), 0.12)
 		else:
 			_tween.tween_property(card, "position", base, 0.15)
 			_tween.tween_property(card, "rotation", deg_to_rad(angle), 0.15)

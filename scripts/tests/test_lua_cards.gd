@@ -122,9 +122,59 @@ static func run() -> bool:
 	# ---------- 8. battle.lua POWER 触发 ----------
 	var b = LuaRuntime.battle_trigger_powers({"powers": {
 		"damo": true, "twoway": false, "bahuang": false,
-		"longxiang": false, "xiaoyaoyou": false}})
+		"longxiang": false, "xiaoyaoyou": false, "bodhi": false}})
 	TestBase.assert_eq(b.get("chan_add", 0), 2, "达摩 触发禅意+2")
 	TestBase.assert_eq(b.get("block", 0), 3, "达摩 触发格挡+3")
+
+	# 菩提心触发
+	var b2 = LuaRuntime.battle_trigger_powers({"powers": {
+		"damo": false, "twoway": false, "bahuang": false,
+		"longxiang": false, "xiaoyaoyou": false, "bodhi": true}})
+	TestBase.assert_eq(b2.get("chan_add", 0), 1, "菩提心 触发禅意+1")
+	TestBase.assert_eq(b2.get("block", 0), 1, "菩提心 触发格挡+1")
+
+	# ---------- 8.5 新卡语义 ----------
+	# 惊雷掌：敌人有护盾 → 伤害翻倍
+	r = LuaRuntime.execute_card("thunder_strike", make_ctx("thunder_strike", {"damage": 6, "enemy_block": 5}))
+	TestBase.assert_eq(r.get("damage", -1), 12, "惊雷掌 有盾翻倍")
+	r = LuaRuntime.execute_card("thunder_strike", make_ctx("thunder_strike", {"damage": 6, "enemy_block": 0}))
+	TestBase.assert_eq(r.get("damage", -1), 6, "惊雷掌 无盾正常")
+
+	# 铁肤：首牌额外格挡
+	r = LuaRuntime.execute_card("iron_skin", make_ctx("iron_skin", {"block": 6, "card_type": 1, "cards_played_this_turn": 1}))
+	TestBase.assert_eq(r.get("block", -1), 10, "铁肤 首牌+4格挡")
+	r = LuaRuntime.execute_card("iron_skin", make_ctx("iron_skin", {"block": 6, "card_type": 1, "cards_played_this_turn": 3}))
+	TestBase.assert_eq(r.get("block", -1), 6, "铁肤 非首牌正常")
+
+	# 以血换气：0费失血换资源
+	r = LuaRuntime.execute_card("blood_exchange", make_ctx("blood_exchange", {"card_type": 1}))
+	TestBase.assert_eq(r.get("hp_cost", 0), 3, "以血换气 失3血")
+	TestBase.assert_eq(r.get("energy_gain", 0), 2, "以血换气 得2内力")
+	TestBase.assert_eq(r.get("draw", 0), 1, "以血换气 抽1")
+
+	# 旋风斩：连击=弃牌堆数量
+	r = LuaRuntime.execute_card("whirlwind_slash", make_ctx("whirlwind_slash", {"damage": 3, "discard_csv": "a,b,c"}))
+	TestBase.assert_eq(r.get("repeat_count", 0), 3, "旋风斩 弃3连击3")
+	r = LuaRuntime.execute_card("whirlwind_slash", make_ctx("whirlwind_slash", {"damage": 3, "discard_csv": ""}))
+	TestBase.assert_eq(r.get("repeat_count", 0), 1, "旋风斩 无弃牌保底1")
+
+	# 三清剑：剑意≥2 抽1回能
+	r = LuaRuntime.execute_card("wd_sanqing", make_ctx("wd_sanqing", {"damage": 10, "player_jianyi": 3}))
+	TestBase.assert_eq(r.get("draw", 0), 1, "三清剑 剑意≥2抽1")
+	TestBase.assert_eq(r.get("energy_gain", 0), 1, "三清剑 剑意≥2回能")
+	r = LuaRuntime.execute_card("wd_sanqing", make_ctx("wd_sanqing", {"damage": 10, "player_jianyi": 1}))
+	TestBase.assert_eq(r.get("draw", 0), 0, "三清剑 剑意不足不抽")
+
+	# 太虚步：未打攻击牌额外回能
+	r = LuaRuntime.execute_card("xy_taixu", make_ctx("xy_taixu", {"card_type": 4, "attacks_played_this_turn": 0}))
+	TestBase.assert_eq(r.get("draw", 0), 2, "太虚步 抽2")
+	TestBase.assert_eq(r.get("energy_gain", 0), 1, "太虚步 未攻击回能")
+	r = LuaRuntime.execute_card("xy_taixu", make_ctx("xy_taixu", {"card_type": 4, "attacks_played_this_turn": 2}))
+	TestBase.assert_eq(r.get("energy_gain", 0), 0, "太虚步 已攻击不回能")
+
+	# 菩提心 POWER 卡
+	r = LuaRuntime.execute_card("sl_bodhi", make_ctx("sl_bodhi"))
+	TestBase.assert_eq(r.get("set_power", ""), "bodhi", "菩提心 POWER")
 
 	# ---------- 9. 全卡一致性校验：每张 .tres 卡都有 Lua 实现 ----------
 	TestBase.describe("Lua 卡牌一致性校验（.tres ↔ cards/*.lua）")

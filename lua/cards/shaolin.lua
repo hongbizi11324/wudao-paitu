@@ -1,5 +1,5 @@
 -- ==============================================
--- 卡牌模块 · 少林（5张）— 禅意流派
+-- 卡牌模块 · 少林（6张）— 禅意流派
 -- 叠禅意 → 消耗禅意换格挡/伤害
 -- ==============================================
 
@@ -36,5 +36,14 @@ CardEffects.sl_damo = function(ctx)
         damage = 0, block = 0, heal = 0, draw = 0, energy_gain = 0,
         is_consumed = true,
         set_power = "damo",
+    }
+end
+
+-- 菩提心：POWER，每回合开始 禅意+1 格挡+1
+CardEffects.sl_bodhi = function(ctx)
+    return Dictionary{
+        damage = 0, block = 0, heal = 0, draw = 0, energy_gain = 0,
+        is_consumed = true,
+        set_power = "bodhi",
     }
 end

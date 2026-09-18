@@ -30,6 +30,7 @@ var power_twoway: bool = false    # 太极两仪
 var power_bahuang: bool = false   # 八荒六合
 var power_longxiang: bool = false # 龙象般若
 var power_xiaoyaoyou: bool = false # 逍遥游
+var power_bodhi: bool = false     # 菩提心（每回合 禅意+1 格挡+1）
 
 # ========== 角色与被动 ==========
 var is_p2: bool = false
@@ -64,6 +65,7 @@ func init(use_p2_hp: bool = false):
 	power_bahuang = false
 	power_longxiang = false
 	power_xiaoyaoyou = false
+	power_bodhi = false
 	next_card_discount = 0
 	attack_discounted = false
 	hand_limit_mod = 0

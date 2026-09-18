@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" uid="uid://bwf35mxdgdc2t" path="res://scripts/card_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+card_id = "whirlwind_slash"
+card_name = "旋风斩"
+card_type = 0
+cost = 1
+description = "造成3点伤害，连击次数等于弃牌堆数量（至多5次）"
+damage = 3

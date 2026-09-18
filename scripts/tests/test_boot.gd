@@ -38,6 +38,12 @@ func _ready():
 	if not TestLuaCards.run():
 		all_ok = false
 
+	# 4.5 平衡性模拟
+	print("\n▶ Balance ...")
+	TestBase.reset()
+	if not TestBalance.run():
+		all_ok = false
+
 	# 5. 战斗流程集成（真实场景，需要 await）
 	print("\n▶ BattleIntegration ...")
 	TestBase.reset()

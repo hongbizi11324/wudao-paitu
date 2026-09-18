@@ -28,6 +28,12 @@ Battle.trigger_powers = function(ctx)
         result["block"] = result["block"] + 3
     end
 
+    -- 菩提心：每回合 禅意+1、格挡+1
+    if powers.bodhi then
+        result["chan_add"] = result["chan_add"] + 1
+        result["block"] = result["block"] + 1
+    end
+
     -- 八荒六合：每回合 回复3HP + 随机基础牌（随机在宿主侧执行）
     if powers.bahuang then
         result["heal"] = result["heal"] + 3

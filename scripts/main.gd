@@ -181,6 +181,9 @@ const BIOME_ENEMIES = {
 
 @onready var _battle_bg: TextureRect = $BattleBg
 
+# 敌人立绘基础姿态（死亡动画后恢复用）
+var _enemy_portrait_base := {"pos": Vector2.ZERO, "rot": 0.0}
+
 
 # ==============================
 # 生命周期
@@ -194,6 +197,10 @@ func _ready():
 	fx.name = "BattleFX"
 	add_child(fx)
 
+	# 记录敌人立绘基础姿态（死亡动画后恢复用）
+	_enemy_portrait_base["pos"] = enemy_portrait.position
+	_enemy_portrait_base["rot"] = enemy_portrait.rotation
+
 	# 先设置别名，确保信号触发时不会 null
 	hand = hand1
 	player = player1
@@ -206,6 +213,8 @@ func _ready():
 	# 连接信号 — 双方都连
 	hand1.card_selected.connect(_on_card_played)
 	hand2.card_selected.connect(_on_card_played)
+	hand1.hand_full.connect(func(): _on_hand_full(1))
+	hand2.hand_full.connect(func(): _on_hand_full(2))
 	player1.energy_changed.connect(_on_energy_changed)
 	player2.energy_changed.connect(_on_energy_changed)
 	player1.hp_changed.connect(_on_hp_changed)
@@ -429,6 +438,7 @@ func _execute_enemy_turn():
 
 
 ## 玩家受击表现：红字 + 立绘闪红 + 屏幕闪红
+## 玩家受击表现：红字 + 立绘闪红 + 屏幕闪红
 func _play_player_hit_fx(pid: int, dmg: int) -> void:
 	if fx == null:
 		return
@@ -438,6 +448,14 @@ func _play_player_hit_fx(pid: int, dmg: int) -> void:
 	fx.shake(pt, 6.0, 0.25)
 	fx.screen_flash(Color(1, 0, 0), 0.18, 0.3)
 	BgmManager.play_sfx("hurt")
+
+
+## 手牌已满提示
+func _on_hand_full(pid: int) -> void:
+	if fx == null:
+		return
+	var h := _hand_node(pid)
+	fx.float_text(h.global_position + Vector2(0, -20), "手牌已满", BattleFX.COLOR_ARMOR_BREAK, 18)
 
 
 # ==============================
@@ -584,8 +602,11 @@ func _execute_card(card):
 	# ---- 费用 ----
 	var calc := _calc_card_cost(data, pid)
 	if not player.spend_energy(calc.cost):
-		# 内力不足：不消耗任何折扣，取消选中
+		# 内力不足：不消耗任何折扣，取消选中 + 抖动反馈
 		hand.deselect()
+		if fx:
+			fx.shake(card, 4.0, 0.2)
+		BgmManager.play_sfx("defeat")
 		print("[费用不足] %s 需要 %d 内力" % [data.card_name, calc.cost])
 		return
 
@@ -698,6 +719,7 @@ func _play_card_fx(data: CardData, result: Dictionary, card,
 			"bahuang": "八荒六合",
 			"longxiang": "龙象般若",
 			"xiaoyaoyou": "逍遥游",
+			"bodhi": "菩提心",
 		}
 		fx.show_banner("「%s」 激活！" % power_names.get(set_power, set_power), "每回合自动生效", BattleFX.COLOR_VICTORY)
 		BgmManager.play_sfx("power")
@@ -705,6 +727,8 @@ func _play_card_fx(data: CardData, result: Dictionary, card,
 	# 卡牌飞行：攻击飞向敌人，其余飞向自身
 	var to_pos: Vector2 = _enemy_fx_pos() if data.card_type == CardData.CardType.ATTACK else _player_fx_pos(_active_player)
 	fx.card_flight(card.global_position, to_pos, data)
+	# 原卡缩小消失（视觉连贯）
+	fx.card_exit(card.global_position, data)
 
 
 func _enemy_fx_pos() -> Vector2:
@@ -736,6 +760,8 @@ func _fallback_result(data: CardData) -> Dictionary:
 			r["energy_gain"] = GameData.get_meditate_gain()
 		"sl_damo":
 			r["set_power"] = "damo"; r["is_consumed"] = true
+		"sl_bodhi":
+			r["set_power"] = "bodhi"; r["is_consumed"] = true
 		"wd_twoway":
 			r["set_power"] = "twoway"; r["is_consumed"] = true
 		"xy_bahuang":
@@ -830,6 +856,7 @@ func _trigger_power_effects(p: Player, pid: int):
 				"bahuang": p.power_bahuang,
 				"longxiang": p.power_longxiang,
 				"xiaoyaoyou": p.power_xiaoyaoyou,
+				"bodhi": p.power_bodhi,
 			},
 		}
 		var result := LuaRuntime.battle_trigger_powers(ctx)
@@ -842,6 +869,10 @@ func _trigger_power_effects(p: Player, pid: int):
 		p.chan += 2
 		p.add_block(3)
 		print("达摩一苇：禅意+2，格挡+3")
+	if p.power_bodhi:
+		p.chan += 1
+		p.add_block(1)
+		print("菩提心：禅意+1，格挡+1")
 	if p.power_bahuang:
 		p.heal(3)
 		var ex := _make_executor(pid)
@@ -1290,6 +1321,11 @@ func _reset_battle_state():
 
 
 func _start_battle():
+	# 恢复敌人立绘姿态（上一场死亡动画可能改变了位置/旋转/透明度）
+	enemy_portrait.modulate = Color(1, 1, 1, 1)
+	enemy_portrait.rotation = _enemy_portrait_base["rot"]
+	enemy_portrait.position = _enemy_portrait_base["pos"]
+
 	var ft = GameData.get_floor_type()
 	var ft_names = ["普通", "精英", "Boss"]
 	enemy.init_from_floor(GameData.current_floor, ft)
@@ -1703,6 +1739,12 @@ func _on_enemy_block_changed(cur):
 func _on_enemy_intent_changed(type: int, value: int):
 	var intent_names = ["⚔攻击", "🛡防御"]
 	enemy_intent_label.text = "%s %d" % [intent_names[type], value]
+	# 意图切换弹跳动画（手感）
+	enemy_intent_label.pivot_offset = enemy_intent_label.size / 2.0
+	var tw := create_tween()
+	tw.tween_property(enemy_intent_label, "scale", Vector2(1.25, 1.25), 0.09) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(enemy_intent_label, "scale", Vector2.ONE, 0.12)
 
 
 # ==============================
@@ -1772,6 +1814,9 @@ func _on_player_died():
 
 func _on_enemy_died_by_signal():
 	if not game_over:
+		# 死亡动画（表现层），随后进入战斗结算
+		if fx:
+			fx.enemy_death(enemy_portrait)
 		_on_battle_end(true)
 
 

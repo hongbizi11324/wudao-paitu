@@ -80,8 +80,9 @@ func get_floor_type() -> FloorType:
 
 
 ## 敌人数值曲线（1.15 复合增长 + 类型系数）：
-## 普通层 floor10 ≈ 88 HP（4~5回合）、精英 ×1.4、Boss ×2.2
-## 旧曲线 1.2+Boss2.5 会让第12层 Boss 高达 466 HP，拖成消耗战
+## 普通层 floor10 ≈ 88 HP、精英 ×1.4、Boss ×3.8
+## Boss 系数经平衡模型标定：玩家境界成长（内力上限+1/境）使输出增长快于
+## 1.15^n，旧 ×2.2 会让第6层 Boss 仅 4 回合被秒。×3.8 后第6层≈7回合、第12层≈10回合。
 func get_enemy_hp() -> int:
 	var multiplier = pow(1.15, current_floor - 1)
 	var base_hp = ceili(25 * multiplier)
@@ -89,7 +90,7 @@ func get_enemy_hp() -> int:
 		FloorType.ELITE:
 			return ceili(base_hp * 1.4)
 		FloorType.BOSS:
-			return ceili(base_hp * 2.2)
+			return ceili(base_hp * 3.8)
 		_:
 			return base_hp
 
@@ -273,12 +274,14 @@ const NEUTRAL_CARDS: Array = [
 	"double_strike", "tactics", "iron_wall", "vigor", "whirlwind",
 	"flowing_cloud_sword", "triple_stab", "sword_energy",
 	"iron_shirt", "vajra_fist", "golden_bell", "bash", "heal",
+	# 新卡（2026-09-18）
+	"thunder_strike", "iron_skin", "blood_exchange", "spirit_guard", "whirlwind_slash",
 ]
 
 # 门派专属卡
 const SCHOOL_CARDS: Dictionary = {
-	"shaolin": ["sl_fist", "sl_iron", "sl_golden", "sl_arhat", "sl_damo"],
-	"wudang": ["wd_taiji", "wd_soft", "wd_steps", "wd_heavy", "wd_twoway"],
+	"shaolin": ["sl_fist", "sl_iron", "sl_golden", "sl_arhat", "sl_damo", "sl_bodhi"],
+	"wudang": ["wd_taiji", "wd_soft", "wd_steps", "wd_heavy", "wd_twoway", "wd_sanqing"],
 	"xiaoyao": [
 		"xy_beiming", "xy_lingbo", "xy_wuxiang", "xy_zhemel", "xy_bahuang",
 		"xy_xiaoyaoyou", "xy_xingluo", "xy_fengjuan", "xy_guicang", "xy_fuguang",
@@ -286,6 +289,7 @@ const SCHOOL_CARDS: Dictionary = {
 		"xy_houfa", "xy_jinghua", "xy_wujian", "xy_xushi", "xy_yixing",
 		"xy_hantan", "xy_qiguan", "xy_tuna", "xy_longxiang", "xy_baoyuan",
 		"xy_xixing", "xy_guanxing", "xy_fange", "xy_yibizhi", "xy_duotian",
+		"xy_taixu",
 	],
 }
 
