@@ -309,6 +309,14 @@ func request_shop_delete(card_id: String, target_player: int):
 	_safe_call("network_shop_delete", [card_id, target_player])
 
 
+# 客机 → 主机：商店刷新货架
+@rpc("any_peer", "reliable")
+func request_shop_refresh():
+	if not is_host:
+		return
+	_safe_call("network_shop_refresh", [])
+
+
 # 客机 → 主机：商店逛完
 @rpc("any_peer", "reliable")
 func request_shop_done():

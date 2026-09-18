@@ -126,4 +126,37 @@ static func run() -> bool:
 	TestBase.assert_eq(b.get("chan_add", 0), 2, "达摩 触发禅意+2")
 	TestBase.assert_eq(b.get("block", 0), 3, "达摩 触发格挡+3")
 
+	# ---------- 9. 全卡一致性校验：每张 .tres 卡都有 Lua 实现 ----------
+	TestBase.describe("Lua 卡牌一致性校验（.tres ↔ cards/*.lua）")
+	var missing: Array = []
+	var dir = DirAccess.open("res://resources/cards")
+	if dir:
+		dir.list_dir_begin()
+		var fname := dir.get_next()
+		while fname != "":
+			if fname.ends_with(".tres"):
+				var card_id := fname.trim_suffix(".tres")
+				if not LuaRuntime.has_card_impl(card_id):
+					missing.append(card_id)
+			fname = dir.get_next()
+		dir.list_dir_end()
+	if missing.is_empty():
+		TestBase.assert_true(true, "全部 %d 张卡均有 Lua 实现" % _count_tres())
+	else:
+		TestBase.assert_true(false, "缺失 Lua 实现: %s" % str(missing))
+
 	return TestBase.failed == 0
+
+
+static func _count_tres() -> int:
+	var dir = DirAccess.open("res://resources/cards")
+	var n := 0
+	if dir:
+		dir.list_dir_begin()
+		var fname := dir.get_next()
+		while fname != "":
+			if fname.ends_with(".tres"):
+				n += 1
+			fname = dir.get_next()
+		dir.list_dir_end()
+	return n

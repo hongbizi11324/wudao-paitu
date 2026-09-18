@@ -13,9 +13,12 @@ extends CanvasLayer
 signal continue_requested()
 signal buy_requested(card_id: String, target_player: int)   # 联机客机 → 转发主机
 signal delete_requested(card_id: String, target_player: int)
+signal refresh_requested()   # 联机客机 → 请求主机刷新
+signal refreshed(stock: Array, sold: Array)  # 本端刷新成功 → 主机广播
 
 const BUY_PRICE: int = 10
 const DELETE_PRICE: int = 6
+const REFRESH_PRICE: int = 4
 const STOCK_COUNT: int = 3
 
 var stock: Array = []        # 库存槽位：card_id，"" 表示已售罄
@@ -34,11 +37,19 @@ var target_player: int = 1   # 双人模式：当前操作的牌组（1=P1 / 2=P
 
 var _target_btn_p1: Button = null
 var _target_btn_p2: Button = null
+var _refresh_btn: Button = null
 
 
 func _ready():
 	continue_btn.pressed.connect(_on_continue)
 	overlay.gui_input.connect(_on_overlay_clicked)
+	_refresh_btn = Button.new()
+	_refresh_btn.text = "刷新货架(%d金)" % REFRESH_PRICE
+	_refresh_btn.position = Vector2(800, 16)
+	_refresh_btn.size = Vector2(120, 30)
+	_refresh_btn.add_theme_font_size_override("font_size", 13)
+	_refresh_btn.pressed.connect(_on_refresh)
+	panel.add_child(_refresh_btn)
 
 
 ## open(host_stock, host_sold)：联机客机传主机同步来的库存；单机/主机传空自行生成
@@ -269,6 +280,30 @@ func apply_remote_delete(card_id: String, p: int) -> void:
 
 func _update_gold():
 	gold_label.text = "金币：%d" % GameData.gold
+
+
+# ==============================
+# 刷新货架
+# ==============================
+
+func _on_refresh():
+	# 联机客机：请求主机结算
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		refresh_requested.emit()
+		return
+	if try_refresh():
+		refreshed.emit(stock, sold)
+
+
+## 尝试花金币刷新库存；成功返回 true（主机与单机共用结算入口）
+func try_refresh() -> bool:
+	if not GameData.spend_gold(REFRESH_PRICE):
+		_toast("金币不足！")
+		return false
+	_restock()
+	_refresh_all()
+	_toast("已刷新货架")
+	return true
 
 
 func _on_continue():

@@ -191,6 +191,34 @@ var event_pool = [
 			{"text": "静心参悟（获得 15 修为）", "action": "cultivate"},
 			{"text": "赶路要紧，不能耽搁", "action": "skip"}
 		]
+	},
+	{
+		"id": "hermit",
+		"title": "隐世高人",
+		"desc": "一位鹤发童颜的老者席地而坐，见你路过微微一笑：「小友骨骼清奇，老夫这有一门绝学，想不想学？」",
+		"options": [
+			{"text": "传功（消耗 20 修为，随机获得一张新卡牌）", "action": "teach"},
+			{"text": "请教一二（获得 5 修为）", "action": "ask"},
+			{"text": "不敢叨扰前辈", "action": "skip"}
+		]
+	},
+	{
+		"id": "duel",
+		"title": "拦路武者",
+		"desc": "一名武者横刀立于路中央：「此路是我开！要从此过，先胜过我手中这把刀！」",
+		"options": [
+			{"text": "接受挑战（-12 HP，胜者得 25 修为 + 15 金币）", "action": "fight"},
+			{"text": "绕路而行", "action": "skip"}
+		]
+	},
+	{
+		"id": "hotspring",
+		"title": "灵泉",
+		"desc": "山涧中一汪温泉雾气氤氲，泉水泛着淡淡的灵光，泡上一泡定能祛除疲惫、疏通经脉。",
+		"options": [
+			{"text": "浸泡灵泉（花费 8 金币，恢复 40% 最大生命）", "action": "bath"},
+			{"text": "灵气可能有害，绕行", "action": "skip"}
+		]
 	}
 ]
 

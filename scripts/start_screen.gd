@@ -25,6 +25,43 @@ func _ready():
 	_continue_btn.pressed.connect(_on_continue)
 	$HostBtn.pressed.connect(_on_host)
 	$JoinBtn.pressed.connect(_on_join)
+	_build_volume_ui()
+
+
+## 音量设置（音乐/音效独立滑块，代码创建避免改场景）
+func _build_volume_ui():
+	var title := Label.new()
+	title.text = "── 设 置 ──"
+	title.position = Vector2(20, 452)
+	title.size = Vector2(140, 20)
+	title.add_theme_font_size_override("font_size", 13)
+	title.add_theme_color_override("font_color", Color(0.7, 0.7, 0.8, 0.8))
+	add_child(title)
+
+	var mk_row := func(label_text: String, y: float, getter: Callable, setter: Callable):
+		var lb := Label.new()
+		lb.text = label_text
+		lb.position = Vector2(20, y)
+		lb.size = Vector2(110, 18)
+		lb.add_theme_font_size_override("font_size", 12)
+		lb.add_theme_color_override("font_color", Color(0.75, 0.75, 0.85, 0.9))
+		add_child(lb)
+
+		var sd := HSlider.new()
+		sd.position = Vector2(128, y)
+		sd.size = Vector2(100, 18)
+		sd.min_value = 0.0
+		sd.max_value = 100.0
+		sd.step = 5.0
+		sd.value = float(getter.call()) * 100.0
+		sd.value_changed.connect(func(v: float): setter.call(v / 100.0))
+		sd.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		add_child(sd)
+
+	mk_row.call("音乐音量", 478, func(): return BgmManager.music_volume,
+		func(v): BgmManager.set_music_volume(v))
+	mk_row.call("音效音量", 502, func(): return BgmManager.sfx_volume,
+		func(v): BgmManager.set_sfx_volume(v))
 
 
 func _on_start_hover():

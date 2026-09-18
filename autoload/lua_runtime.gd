@@ -178,6 +178,16 @@ func preview_card(card_id: String, ctx: Dictionary) -> Dictionary:
 	return execute_card(card_id, ctx)
 
 
+## 卡牌是否已有 Lua 实现（一致性校验器用）
+func has_card_impl(card_id: String) -> bool:
+	if not enabled or not _ready_flag:
+		return false
+	var card_effects = _lua.globals["CardEffects"]
+	if card_effects == null or card_effects is LuaError:
+		return false
+	return card_effects[card_id] != null
+
+
 # ==============================================
 # POWER/回合逻辑（同样返回清单，由宿主执行）
 # ==============================================

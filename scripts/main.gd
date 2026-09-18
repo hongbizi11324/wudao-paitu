@@ -83,6 +83,10 @@ var _reward_picker: int = 1
 
 var _scene_loaded: bool = false
 var _waiting_mask: ColorRect = null
+var fx: BattleFX  # 战斗表现层（飘字/受击/横幅）
+
+# 战斗统计（胜利战报用）
+var _battle_stats: Dictionary = {"turns": 0, "cards": 0, "damage": 0, "max_hit": 0, "block": 0}
 
 # ==============================
 # 模式查询 / 玩家上下文
@@ -185,6 +189,11 @@ const BIOME_ENEMIES = {
 func _ready():
 	card_scene = load("res://scenes/card.tscn")
 
+	# 战斗表现层（特效）
+	fx = BattleFX.new()
+	fx.name = "BattleFX"
+	add_child(fx)
+
 	# 先设置别名，确保信号触发时不会 null
 	hand = hand1
 	player = player1
@@ -214,6 +223,8 @@ func _ready():
 	shop_screen.continue_requested.connect(_on_shop_done)
 	shop_screen.buy_requested.connect(_on_shop_buy_requested)
 	shop_screen.delete_requested.connect(_on_shop_delete_requested)
+	shop_screen.refresh_requested.connect(_on_shop_refresh_requested)
+	shop_screen.refreshed.connect(_on_shop_refreshed)
 	node_map.node_selected.connect(_on_node_selected)
 	rest_screen.closed.connect(_on_rest_closed)
 	event_screen.closed.connect(_on_event_closed)
@@ -310,6 +321,12 @@ func _prepare_battle_ui():
 
 func _on_turn_started(turn: int):
 	_apply_turn(turn)
+	# 战斗统计：玩家回合计数
+	if turn == TurnManager.Turn.PLAYER1:
+		_battle_stats["turns"] = int(_battle_stats.get("turns", 0)) + 1
+	# 表现层：敌人回合横幅（玩家回合不弹，避免噪音）
+	if fx and turn == TurnManager.Turn.ENEMY:
+		fx.show_banner("敌人回合", "小心对方的意图", Color(0.95, 0.4, 0.35))
 	# 局域网：主机同步回合给客机
 	if NetworkManager.is_lan and NetworkManager.is_host:
 		NetworkManager.push_snapshot()
@@ -383,11 +400,44 @@ func _execute_enemy_turn():
 	var players: Array = [player1]
 	if _is_dual():
 		players = [player1, player2]
+
+	# 记录双方状态，用于表现层判定"谁挨打了"
+	var p1_hp_before: int = player1.hp
+	var p2_hp_before: int = player2.hp
+	var p1_blk_before: int = player1.block
+	var p2_blk_before: int = player2.block
+
 	var alive = gm.execute_enemy_turn(players, enemy)
 	if game_over:
 		return
+
+	# 表现层：敌人攻击反馈
+	if fx:
+		if enemy.intent_type == Enemy.IntentType.ATTACK:
+			fx.shake(enemy_portrait, 5.0, 0.22)
+			if player1.hp < p1_hp_before:
+				_play_player_hit_fx(1, p1_hp_before - player1.hp)
+			elif player2.hp < p2_hp_before:
+				_play_player_hit_fx(2, p2_hp_before - player2.hp)
+			elif player1.block < p1_blk_before:
+				fx.float_text(_player_fx_pos(1), "格挡", BattleFX.COLOR_BLOCK)
+			elif player2.block < p2_blk_before:
+				fx.float_text(_player_fx_pos(2), "格挡", BattleFX.COLOR_BLOCK)
+
 	if alive:
 		turn_manager.end_enemy_turn()
+
+
+## 玩家受击表现：红字 + 立绘闪红 + 屏幕闪红
+func _play_player_hit_fx(pid: int, dmg: int) -> void:
+	if fx == null:
+		return
+	var pt: TextureRect = p2_portrait if pid == 2 else p1_portrait
+	fx.float_text(_player_fx_pos(pid), "-%d" % dmg, BattleFX.COLOR_DAMAGE, 26)
+	fx.flash(pt, Color(1.5, 0.7, 0.7, 1.0))
+	fx.shake(pt, 6.0, 0.25)
+	fx.screen_flash(Color(1, 0, 0), 0.18, 0.3)
+	BgmManager.play_sfx("hurt")
 
 
 # ==============================
@@ -561,17 +611,109 @@ func _execute_card(card):
 		result = _fallback_result(data)
 
 	# ---- 原子执行 ----
+	var e_hp_before: int = enemy.hp
+	var e_block_before: int = enemy.block
+	var p_hp_before: int = player.hp
+	var p_block_before: int = player.block
+	var p_energy_before: int = player.energy
+	var p_chan_before: int = player.chan
+	var p_jianyi_before: int = player.jianyi
+
 	var ex := _make_executor(pid)
 	ex.played_card = card
 	ex.played_card_id = data.card_id
 	ex.played_card_type = data.card_type
 	ex.apply(result)
 
+	# ---- 表现层：数值变化 → 特效（CardExecutor 保持纯逻辑）----
+	_play_card_fx(data, result, card,
+		e_hp_before, e_block_before, p_hp_before, p_block_before, p_energy_before,
+		p_chan_before, p_jianyi_before)
+
 	_update_deck_ui()
 	_update_sect_ui()
 
 	if enemy.hp <= 0 and not game_over:
 		_on_battle_end(true)
+
+
+## 出牌特效：伤害飘字/闪白、格挡/回血/内力飘字、POWER横幅、卡牌飞行
+func _play_card_fx(data: CardData, result: Dictionary, card,
+		e_hp_before: int, e_block_before: int,
+		p_hp_before: int, p_block_before: int, p_energy_before: int,
+		p_chan_before: int, p_jianyi_before: int) -> void:
+	if fx == null:
+		return
+
+	# 出牌音效
+	BgmManager.play_sfx("play")
+
+	# 战斗统计累计
+	_battle_stats["cards"] = int(_battle_stats.get("cards", 0)) + 1
+	_battle_stats["damage"] = int(_battle_stats.get("damage", 0)) + max(0, e_hp_before - enemy.hp)
+	_battle_stats["max_hit"] = maxi(int(_battle_stats.get("max_hit", 0)), e_hp_before - enemy.hp)
+	_battle_stats["block"] = int(_battle_stats.get("block", 0)) + max(0, player.block - p_block_before)
+
+	# 伤害：敌人HP减少 → 飘红字 + 闪白 + 抖动
+	var dmg_dealt: int = e_hp_before - enemy.hp
+	var armor_broken: bool = int(result.get("armor_break", 0)) > 0 and e_block_before > 0
+	if dmg_dealt > 0:
+		fx.damage_text(_enemy_fx_pos(), dmg_dealt, armor_broken)
+		fx.flash(enemy_portrait)
+		fx.shake(enemy_portrait)
+		BgmManager.play_sfx("hit")
+
+	# 破甲摧毁护盾但无伤害 → 橙字
+	if e_block_before > enemy.block and dmg_dealt == 0:
+		fx.float_text(_enemy_fx_pos(), "破甲%d" % (e_block_before - enemy.block), BattleFX.COLOR_ARMOR_BREAK)
+
+	# 格挡
+	var blk_gained: int = player.block - p_block_before
+	if blk_gained > 0:
+		fx.float_text(_player_fx_pos(_active_player), "格挡+%d" % blk_gained, BattleFX.COLOR_BLOCK)
+		BgmManager.play_sfx("block")
+
+	# 回血
+	if player.hp > p_hp_before:
+		fx.float_text(_player_fx_pos(_active_player), "+%d" % (player.hp - p_hp_before), BattleFX.COLOR_HEAL)
+		BgmManager.play_sfx("heal")
+
+	# 内力
+	if player.energy > p_energy_before:
+		fx.float_text(_player_fx_pos(_active_player, Vector2(0, -34)), "内力+%d" % (player.energy - p_energy_before), BattleFX.COLOR_ENERGY)
+		BgmManager.play_sfx("energy")
+
+	# 门派资源
+	if player.chan > p_chan_before:
+		fx.float_text(_player_fx_pos(_active_player, Vector2(0, -68)), "禅+%d" % (player.chan - p_chan_before), BattleFX.COLOR_CHAN, 18)
+	if player.jianyi > p_jianyi_before:
+		fx.float_text(_player_fx_pos(_active_player, Vector2(0, -68)), "剑+%d" % (player.jianyi - p_jianyi_before), BattleFX.COLOR_JIANYI, 18)
+
+	# POWER 激活横幅
+	var set_power: String = str(result.get("set_power", ""))
+	if set_power != "":
+		var power_names := {
+			"damo": "达摩一苇",
+			"twoway": "太极两仪",
+			"bahuang": "八荒六合",
+			"longxiang": "龙象般若",
+			"xiaoyaoyou": "逍遥游",
+		}
+		fx.show_banner("「%s」 激活！" % power_names.get(set_power, set_power), "每回合自动生效", BattleFX.COLOR_VICTORY)
+		BgmManager.play_sfx("power")
+
+	# 卡牌飞行：攻击飞向敌人，其余飞向自身
+	var to_pos: Vector2 = _enemy_fx_pos() if data.card_type == CardData.CardType.ATTACK else _player_fx_pos(_active_player)
+	fx.card_flight(card.global_position, to_pos, data)
+
+
+func _enemy_fx_pos() -> Vector2:
+	return enemy_portrait.global_position + enemy_portrait.size * 0.45
+
+
+func _player_fx_pos(pid: int, offset: Vector2 = Vector2.ZERO) -> Vector2:
+	var pt: TextureRect = p2_portrait if pid == 2 else p1_portrait
+	return pt.global_position + pt.size * 0.45 + offset
 
 
 ## Lua 不可用时的通用结算（数值来自 .tres + 少量特例）。
@@ -948,15 +1090,29 @@ func _on_battle_end(won):
 	if not won:
 		_update_turn_label("败北...")
 		retry_btn.visible = true
+		if fx:
+			fx.show_banner("败 北", "道心蒙尘，重整旗鼓", Color(0.9, 0.3, 0.3))
+		BgmManager.play_sfx("defeat")
 		if NetworkManager.is_lan and NetworkManager.is_host:
 			NetworkManager.push_snapshot()
 		return
 
 	_update_turn_label("胜利！")
+	if fx:
+		fx.show_banner("胜 利", "此战功成", BattleFX.COLOR_VICTORY)
+		fx.show_stats_panel(_battle_stats)
+	BgmManager.play_sfx("victory")
+
 	# 奖励随楼层类型缩放（与地图提示一致：普通10/12 精英20/20 Boss40/50）
+	var realm_before: int = GameData.current_realm
 	var reward: Dictionary = GameData.get_battle_reward()
 	GameData.add_cultivation(reward["cultivation"])
 	GameData.add_gold(reward["gold"])
+	# 突破横幅
+	if GameData.current_realm > realm_before:
+		if fx:
+			fx.show_banner("突 破！", "%s境 · 内力上限+1" % GameData.realm_names[GameData.current_realm], BattleFX.COLOR_ENERGY)
+		BgmManager.play_sfx("breakthrough")
 
 	var options := _roll_reward_options()
 
@@ -1115,6 +1271,7 @@ func _reset_battle_state():
 	game_over = false
 	end_turn_btn.disabled = false
 	retry_btn.visible = false
+	_battle_stats = {"turns": 0, "cards": 0, "damage": 0, "max_hit": 0, "block": 0}
 	player1.init()
 	player2.init(true)
 	hand1.clear()
@@ -1142,6 +1299,8 @@ func _start_battle():
 		_battle_bg.texture = load("res://assets/images/backgrounds/boss_bg.png")
 		enemy_portrait.texture = load("res://assets/images/enemies/boss_lord.png")
 		print("敌人: 武道盟主（镇关Boss）")
+		if fx:
+			fx.show_banner("镇 关 之 战", "武道盟主 现身！", Color(0.9, 0.3, 0.3))
 		_update_floor_label()
 		print("===== 第 %d 层 · %s战 =====" % [GameData.current_floor, ft_names[ft]])
 		return
@@ -1161,6 +1320,9 @@ func _start_battle():
 		var tex_path = "res://assets/images/enemies/%s.tres" % eid
 		enemy_portrait.texture = load(tex_path)
 		print("敌人: %s" % eid)
+		if fx:
+			var lv_tag := "精英" if ft == GameData.FloorType.ELITE else "普通"
+			fx.show_banner("遭遇 · %s" % eid, "%s战 · 第%d层" % [lv_tag, GameData.current_floor], BattleFX.COLOR_INFO)
 
 	_update_floor_label()
 	var biome_names = ["竹林", "村庄", "官府", "门派"]
@@ -1268,6 +1430,24 @@ func _apply_event_action(action: String):
 				GameData.player2_hp = mini(GameData.player2_max_hp, GameData.player2_hp + 15)
 		"cultivate":
 			GameData.add_cultivation(15)
+		"teach":
+			# 传功：消耗20修为换随机新卡
+			if GameData.cultivation >= 20:
+				GameData.spend_cultivation(20)
+				GameData.add_card(GameData.get_random_new_card())
+		"ask":
+			GameData.add_cultivation(5)
+		"fight":
+			# 挑战：掉血换修为+金币
+			GameData.player_hp = maxi(1, GameData.player_hp - 12)
+			GameData.add_cultivation(25)
+			GameData.add_gold(15)
+		"bath":
+			# 灵泉：8金币恢复40%最大生命（双人全队）
+			if GameData.spend_gold(8):
+				GameData.heal_player(0.4)
+				if _is_dual():
+					GameData.heal_player2(0.4)
 		"skip":
 			pass
 
@@ -1326,6 +1506,28 @@ func _on_shop_delete_requested(card_id: String, target_player: int):
 	"""客机的删牌请求 → 转发主机结算"""
 	if NetworkManager.is_lan and not NetworkManager.is_host:
 		NetworkManager.rpc_id(1, "request_shop_delete", card_id, target_player)
+
+
+func _on_shop_refresh_requested():
+	"""客机的刷新请求 → 转发主机结算"""
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		NetworkManager.rpc_id(1, "request_shop_refresh")
+
+
+func _on_shop_refreshed(stock: Array, sold: Array):
+	"""本端刷新成功 → 联机主机广播新库存"""
+	if NetworkManager.is_lan and NetworkManager.is_host:
+		NetworkManager.rpc("sync_shop_open", stock, sold)
+		NetworkManager.push_snapshot()
+
+
+func network_shop_refresh():
+	"""主机收到客机刷新请求：扣钱+换货+广播"""
+	if not NetworkManager.is_host or _node_result_done:
+		return
+	if shop_screen.try_refresh():
+		NetworkManager.rpc("sync_shop_open", shop_screen.stock, shop_screen.sold)
+		NetworkManager.push_snapshot()
 
 
 func network_shop_buy(card_id: String, target_player: int):
