@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_mcx85"]
+
+[resource]
+script = ExtResource("1_mcx85")
+card_id = "xy_lianhuan+"
+card_name = "连环计+"
+card_type = 1
+cost = 0
+description = "本回合每打出一张技能牌，获得2点格挡
+[强化]"
+school = "xiaoyao"

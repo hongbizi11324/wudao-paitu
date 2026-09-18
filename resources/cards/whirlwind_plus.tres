@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_2e51t"]
+
+[resource]
+script = ExtResource("1_2e51t")
+card_id = "whirlwind+"
+card_name = "旋风+"
+cost = 2
+description = "造成8点伤害，抽1张牌
+[强化]"
+damage = 11
+draw = 1

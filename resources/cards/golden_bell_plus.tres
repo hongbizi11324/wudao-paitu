@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_5070f"]
+
+[resource]
+script = ExtResource("1_5070f")
+card_id = "golden_bell+"
+card_name = "金钟罩+"
+card_type = 1
+cost = 2
+description = "获得8点格挡
+[强化]"
+block = 11

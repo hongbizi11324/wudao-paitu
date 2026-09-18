@@ -372,4 +372,4 @@ func _label(text: String, w: float, h: float, pos: Vector2, fs: int, color: Colo
 
 
 func _load_data(card_id: String) -> CardData:
-	return load("res://resources/cards/%s.tres" % card_id) as CardData
+	return GameData.load_card(card_id)

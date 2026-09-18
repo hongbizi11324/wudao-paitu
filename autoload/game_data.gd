@@ -309,6 +309,78 @@ func get_character_pool(character_id: String = "", extra_schools: Array = []) ->
 	return pool
 
 
+# ---------- 卡牌加载（强化卡统一入口） ----------
+
+# 卡牌资源缓存：card_id -> CardData
+var _card_cache: Dictionary = {}
+
+
+## 卡牌ID → 资源路径。
+## 强化卡用 "+" 后缀（如 "strike+"），文件名对应 "strike_plus.tres"。
+func card_path(card_id: String) -> String:
+	if card_id.ends_with("+"):
+		return "res://resources/cards/%s_plus.tres" % card_id.trim_suffix("+")
+	return "res://resources/cards/%s.tres" % card_id
+
+
+## 加载卡牌数据（带缓存）。所有界面/结算统一走这里，不要自己拼路径。
+func load_card(card_id: String) -> CardData:
+	if _card_cache.has(card_id):
+		return _card_cache[card_id]
+	var data: CardData = load(card_path(card_id))
+	if data:
+		_card_cache[card_id] = data
+	return data
+
+
+## 是否为强化卡
+func is_upgraded(card_id: String) -> bool:
+	return card_id.ends_with("+")
+
+
+## 强化牌组中的一张卡（把第一张 base_id 替换为 base_id+"+"）。
+## 返回 true 表示强化成功。
+func upgrade_card(card_id: String) -> bool:
+	if is_upgraded(card_id):
+		return false
+	var idx := player_deck.find(card_id)
+	if idx == -1:
+		return false
+	var upgraded_id := card_id + "+"
+	# 确认升级卡资源存在
+	if load_card(upgraded_id) == null:
+		push_warning("[强化] 缺少升级卡资源: %s" % upgraded_id)
+		return false
+	player_deck[idx] = upgraded_id
+	print("牌组强化：%s → %s（共 %d 张）" % [card_id, upgraded_id, player_deck.size()])
+	return true
+
+
+## 强化 P2 牌组中的一张卡（双人模式）
+func upgrade_card_p2(card_id: String) -> bool:
+	if is_upgraded(card_id):
+		return false
+	var idx := player2_deck.find(card_id)
+	if idx == -1:
+		return false
+	var upgraded_id := card_id + "+"
+	if load_card(upgraded_id) == null:
+		return false
+	player2_deck[idx] = upgraded_id
+	print("P2牌组强化：%s → %s" % [card_id, upgraded_id])
+	return true
+
+
+## 牌组中可强化的卡（排除已强化的）
+func upgradeable_cards(p: int = 1) -> Array:
+	var deck: Array = player_deck if p == 1 else player2_deck
+	var out: Array = []
+	for cid in deck:
+		if not is_upgraded(cid):
+			out.append(cid)
+	return out
+
+
 # ---------- 牌组 ----------
 
 var player_deck: Array = []

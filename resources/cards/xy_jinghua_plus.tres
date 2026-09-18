@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_5xryt"]
+
+[resource]
+script = ExtResource("1_5xryt")
+card_id = "xy_jinghua+"
+card_name = "镜花水月+"
+card_type = 1
+cost = 0
+description = "复制上一张打出的牌（不能是POWER）
+[强化]"
+school = "xiaoyao"

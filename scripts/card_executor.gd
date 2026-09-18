@@ -199,8 +199,7 @@ func draw_cards(count: int) -> void:
 			draw_pile.pop_back()
 			continue
 		var card_id = draw_pile.pop_back()
-		var path = "res://resources/cards/%s.tres" % card_id
-		var data = load(path)
+		var data = GameData.load_card(card_id)
 		if data == null:
 			push_warning("[CardExecutor] 卡牌资源缺失: %s" % card_id)
 			continue
@@ -226,8 +225,7 @@ func _add_card_to_hand(card_id: String) -> void:
 	if hand == null or card_scene == null:
 		discard_pile.append(card_id)
 		return
-	var path = "res://resources/cards/%s.tres" % card_id
-	var data = load(path)
+	var data = GameData.load_card(card_id)
 	if data == null:
 		return
 	var new_card = CardPool.acquire(card_scene)

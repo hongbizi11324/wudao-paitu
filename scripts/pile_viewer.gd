@@ -62,8 +62,7 @@ func _load_card_data(card_id: String) -> CardData:
 	if _card_data_cache.has(card_id):
 		return _card_data_cache[card_id]
 	
-	var path = "res://resources/cards/%s.tres" % card_id
-	var data = load(path) as CardData
+	var data = GameData.load_card(card_id)
 	if data:
 		_card_data_cache[card_id] = data
 	return data

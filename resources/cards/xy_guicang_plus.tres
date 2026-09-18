@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_7ggkc"]
+
+[resource]
+script = ExtResource("1_7ggkc")
+card_id = "xy_guicang+"
+card_name = "归藏于渊+"
+card_type = 1
+description = "抽2张牌。若手牌≥5张，改为抽3张
+[强化]"
+draw = 3
+school = "xiaoyao"

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_1v3qv"]
+
+[resource]
+script = ExtResource("1_1v3qv")
+card_id = "xy_wanxiang+"
+card_name = "万象归一+"
+card_type = 1
+cost = 2
+description = "弃掉所有手牌，对敌人造成等同于弃牌数×3的伤害
+[强化]"
+school = "xiaoyao"

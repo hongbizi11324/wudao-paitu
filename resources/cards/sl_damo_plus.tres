@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_hnk54"]
+
+[resource]
+script = ExtResource("1_hnk54")
+card_id = "sl_damo+"
+card_name = "达摩一苇+"
+card_type = 2
+cost = 2
+description = "核心：每回合开始时，获得2层禅意和3点格挡
+[强化]"
+school = "shaolin"

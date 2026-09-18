@@ -10,4 +10,4 @@ card_type = 4
 cost = 1
 description = "抽2张牌。本回合未打出攻击牌时，额外获得1点内力"
 draw = 2
-school = xiaoyao
+school = "xiaoyao"

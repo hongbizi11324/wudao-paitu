@@ -47,6 +47,7 @@ var card_scene: PackedScene    # 卡牌场景（运行时 load，避免编译期
 @onready var node_map = $NodeMap
 @onready var rest_screen = $RestScreen
 @onready var event_screen = $EventScreen
+@onready var card_picker = $CardPicker
 @onready var retry_btn = $RetryBtn
 @onready var menu_btn = $MenuBtn  # 战斗中常显，点击回主菜单
 @onready var p1_portrait = $Player1Portrait
@@ -239,7 +240,10 @@ func _ready():
 	shop_screen.refreshed.connect(_on_shop_refreshed)
 	node_map.node_selected.connect(_on_node_selected)
 	rest_screen.closed.connect(_on_rest_closed)
+	rest_screen.upgrade_requested.connect(_open_upgrade_picker)
 	event_screen.closed.connect(_on_event_closed)
+	card_picker.card_picked.connect(_on_upgrade_picked)
+	card_picker.cancelled.connect(_on_upgrade_cancelled)
 
 	# 断线/重连信号
 	if not NetworkManager.player_disconnected.is_connected(_on_player_disconnected):
@@ -1077,7 +1081,7 @@ func _diff_hand(hand_node, target_ids: Array):
 				found = true
 				break
 		if not found:
-			var data = load("res://resources/cards/%s.tres" % cid)
+			var data = GameData.load_card(cid)
 			if data:
 				var card = CardPool.acquire(card_scene)
 				card.setup(data)
@@ -1442,6 +1446,53 @@ func _on_rest_closed(next_action: String):
 func network_rest_done(next_action: String):
 	"""旧接口保留：客机的休息选择（现客机不可交互，理论不会触发）"""
 	_on_rest_closed(next_action)
+
+
+# ==============================
+# 卡牌强化（休息点）
+# ==============================
+
+## 打开强化选择器：单人选P1牌组；双人把P2牌组也并进来
+func _open_upgrade_picker():
+	if _node_result_done:
+		return
+	var candidates: Array = []
+	for cid in GameData.upgradeable_cards(1):
+		candidates.append(cid)
+	if _is_dual():
+		for cid in GameData.upgradeable_cards(2):
+			candidates.append(cid)
+	if candidates.is_empty():
+		return
+	card_picker.open(candidates, "选择要强化的卡牌（永久提升）")
+
+
+func _on_upgrade_cancelled():
+	# 取消后回到休息点面板，不消耗这次休息
+	rest_screen.open(true)
+
+
+func _on_upgrade_picked(card_id: String):
+	var ok := GameData.upgrade_card(card_id)
+	if not ok and _is_dual():
+		ok = GameData.upgrade_card_p2(card_id)
+	if ok:
+		BgmManager.play_sfx("power")
+		if fx:
+			fx.show_banner("强化成功", "%s 永久提升" % card_id, BattleFX.COLOR_JIANYI)
+	else:
+		print("[强化] 失败: %s" % card_id)
+		return
+
+	GameData.save_game()
+	_node_result_done = true
+	rest_screen.visible = false
+	if NetworkManager.is_lan and NetworkManager.is_host:
+		_show_map()
+		NetworkManager.rpc("sync_show_map")
+		NetworkManager.push_snapshot()
+	else:
+		_show_map()
 
 
 func _open_event():

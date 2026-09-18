@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_a0lpi"]
+
+[resource]
+script = ExtResource("1_a0lpi")
+card_id = "meditate+"
+card_name = "调息+"
+card_type = 3
+cost = 0
+description = "获得1点内力
+[强化]"
+energy_gain = 2

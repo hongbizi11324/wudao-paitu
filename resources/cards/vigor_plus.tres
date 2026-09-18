@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_wpilp"]
+
+[resource]
+script = ExtResource("1_wpilp")
+card_id = "vigor+"
+card_name = "活力+"
+card_type = 1
+description = "回复3点生命，抽1张牌
+[强化]"
+heal = 3
+draw = 2

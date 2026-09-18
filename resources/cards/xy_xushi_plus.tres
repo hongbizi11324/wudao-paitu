@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_undel"]
+
+[resource]
+script = ExtResource("1_undel")
+card_id = "xy_xushi+"
+card_name = "虚实相生+"
+card_type = 1
+description = "本回合下两张牌费用-1。若连续打出，第二张再-1
+[强化]"
+school = "xiaoyao"

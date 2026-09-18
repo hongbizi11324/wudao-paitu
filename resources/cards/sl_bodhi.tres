@@ -9,4 +9,4 @@ card_name = "菩提心"
 card_type = 2
 cost = 1
 description = "能力：每回合开始时获得1层禅意和1点格挡"
-school = shaolin
+school = "shaolin"

@@ -186,6 +186,9 @@ static func run() -> bool:
 		while fname != "":
 			if fname.ends_with(".tres"):
 				var card_id := fname.trim_suffix(".tres")
+				# 强化卡文件名 _plus 对应 card_id 的 "+" 后缀
+				if card_id.ends_with("_plus"):
+					card_id = card_id.trim_suffix("_plus") + "+"
 				if not LuaRuntime.has_card_impl(card_id):
 					missing.append(card_id)
 			fname = dir.get_next()

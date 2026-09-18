@@ -15,6 +15,7 @@
 [ext_resource type="Texture2D" uid="uid://bxvdagtkcgesw" path="res://assets/main_screen/竹林.tres" id="13"]
 [ext_resource type="Texture2D" uid="uid://bndvxmv6hcjg1" path="res://assets/images/player/huiming.tres" id="14"]
 [ext_resource type="Texture2D" uid="uid://bshq2quch4pd7" path="res://assets/images/enemies/山匪.tres" id="15"]
+[ext_resource type="PackedScene" path="res://scenes/card_picker.tscn" id="16"]
 
 [node name="Main" type="Node2D" unique_id=1105247720]
 script = ExtResource("1")
@@ -139,6 +140,9 @@ visible = false
 visible = false
 
 [node name="EventScreen" parent="." unique_id=1163287147 instance=ExtResource("11")]
+visible = false
+
+[node name="CardPicker" parent="." instance=ExtResource("16")]
 visible = false
 
 [node name="DeckLabel" type="Label" parent="." unique_id=1183988519]

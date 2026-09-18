@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_aojxt"]
+
+[resource]
+script = ExtResource("1_aojxt")
+card_id = "xy_fengjuan+"
+card_name = "风卷残云+"
+cost = 2
+description = "造成6点伤害。每有1张手牌，伤害+1（最多+4）
+[强化]"
+damage = 8
+school = "xiaoyao"

@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_tme0x"]
+
+[resource]
+script = ExtResource("1_tme0x")
+card_id = "xy_fuguang+"
+card_name = "浮光掠影+"
+card_type = 4
+cost = 0
+description = "抽1张牌。若手牌≤3张，额外抽1张
+[强化]"
+draw = 2
+school = "xiaoyao"

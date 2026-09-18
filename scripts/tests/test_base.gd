@@ -87,7 +87,7 @@ static func make_hand(parent: Node) -> Hand:
 
 
 static func make_card(parent: Node, card_id: String) -> Node:
-	var data: CardData = load("res://resources/cards/%s.tres" % card_id)
+	var data: CardData = GameData.load_card(card_id)
 	var scene: PackedScene = load("res://scenes/card.tscn")
 	var card = CardPool.acquire(scene)
 	card.setup(data)

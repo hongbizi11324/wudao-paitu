@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_uy6y7"]
+
+[resource]
+script = ExtResource("1_uy6y7")
+card_id = "xy_qiguan+"
+card_name = "气贯长虹+"
+cost = 2
+description = "造成6点伤害。额外消耗2点内力，伤害+6
+[强化]"
+damage = 8
+school = "xiaoyao"

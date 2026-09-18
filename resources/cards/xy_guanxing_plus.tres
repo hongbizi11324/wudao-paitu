@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_hsv7m"]
+
+[resource]
+script = ExtResource("1_hsv7m")
+card_id = "xy_guanxing+"
+card_name = "观星望斗+"
+card_type = 1
+cost = 0
+description = "查看敌人下回合意图。若为防御，获得6点格挡
+[强化]"
+school = "xiaoyao"

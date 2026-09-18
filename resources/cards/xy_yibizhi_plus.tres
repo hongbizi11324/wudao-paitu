@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_8wyus"]
+
+[resource]
+script = ExtResource("1_8wyus")
+card_id = "xy_yibizhi+"
+card_name = "以彼之道+"
+card_type = 1
+description = "复制敌人本回合造成的总伤害，获得等量格挡
+[强化]"
+school = "xiaoyao"

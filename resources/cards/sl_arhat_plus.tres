@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_rfmvo"]
+
+[resource]
+script = ExtResource("1_rfmvo")
+card_id = "sl_arhat+"
+card_name = "罗汉伏魔+"
+cost = 2
+description = "造成6点伤害。消耗所有禅意，每层额外+4伤害
+[强化]"
+damage = 8
+school = "shaolin"

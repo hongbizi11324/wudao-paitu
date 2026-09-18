@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_3tkh5"]
+
+[resource]
+script = ExtResource("1_3tkh5")
+card_id = "xy_xiuli+"
+card_name = "袖里乾坤+"
+card_type = 1
+description = "将1张手牌移至牌顶。若移除的是攻击牌，抽1张牌
+[强化]"
+school = "xiaoyao"

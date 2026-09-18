@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_8jwbe"]
+
+[resource]
+script = ExtResource("1_8jwbe")
+card_id = "wd_soft+"
+card_name = "柔云剑+"
+description = "造成5点伤害。消耗1层剑意：伤害+4
+[强化]"
+damage = 7
+school = "wudang"

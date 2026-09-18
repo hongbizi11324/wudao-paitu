@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_mtgvs"]
+
+[resource]
+script = ExtResource("1_mtgvs")
+card_id = "xy_yixing+"
+card_name = "移形换影+"
+card_type = 4
+description = "抽1张牌。若上一张是移动牌，再抽1张
+[强化]"
+draw = 2
+school = "xiaoyao"

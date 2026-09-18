@@ -110,8 +110,7 @@ func _on_overlay_clicked(event: InputEvent):
 
 
 func _load_card_data(card_id: String) -> CardData:
-	var path = "res://resources/cards/%s.tres" % card_id
-	return load(path) as CardData
+	return GameData.load_card(card_id)
 
 
 func _make_label(text: String, w: float, h: float, pos: Vector2, font_size: int, color: Color) -> Label:

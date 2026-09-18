@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_4qjuu"]
+
+[resource]
+script = ExtResource("1_4qjuu")
+card_id = "xy_fange+"
+card_name = "反戈一击+"
+cost = 3
+description = "造成8点伤害。若敌人下回合意图是攻击，伤害翻倍
+[强化]"
+damage = 11
+school = "xiaoyao"

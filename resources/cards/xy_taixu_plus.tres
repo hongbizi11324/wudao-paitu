@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_77xe2"]
+
+[resource]
+script = ExtResource("1_77xe2")
+card_id = "xy_taixu+"
+card_name = "太虚步+"
+card_type = 4
+description = "抽2张牌。本回合未打出攻击牌时，额外获得1点内力
+[强化]"
+draw = 3
+school = "xiaoyao"

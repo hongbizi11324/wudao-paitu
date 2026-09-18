@@ -145,29 +145,34 @@ func check_and_reload() -> void:
 
 ## 计算 card_id 的效果清单。ctx 由 GDScript 打包（含全部所需只读数据）。
 ## execute 与 preview 共用本函数——Lua 无副作用，预览即真值。
+##
+## 强化卡（"strike+"）解析到基础卡函数（"strike"）：升级后的数值来自
+## 升级 .tres，经 ctx 的 damage/block/... 自动生效，无需为每张卡写升级逻辑。
+## （固定数值型条件卡如"折梅手12伤"不随强化提升，属已知取舍）
 func execute_card(card_id: String, ctx: Dictionary) -> Dictionary:
 	if not enabled or not _ready_flag:
 		return {}
 
+	var base_id := card_id.trim_suffix("+")
 	var card_effects = _lua.globals["CardEffects"]
 	if card_effects == null or card_effects is LuaError:
 		return {}
-	if card_effects[card_id] == null:
+	if card_effects[base_id] == null:
 		return {}
 
-	var lua_func = _func_cache.get(card_id)
+	var lua_func = _func_cache.get(base_id)
 	if lua_func == null:
-		var compiled = _lua.load_string("return CardEffects['" + card_id + "'](_G._call_ctx)")
+		var compiled = _lua.load_string("return CardEffects['" + base_id + "'](_G._call_ctx)")
 		if compiled is LuaError:
-			push_error("[LuaRuntime] 编译 %s 出错: %s" % [card_id, str(compiled)])
+			push_error("[LuaRuntime] 编译 %s 出错: %s" % [base_id, str(compiled)])
 			return {}
-		_func_cache[card_id] = compiled
+		_func_cache[base_id] = compiled
 		lua_func = compiled
 
 	_lua.globals["_call_ctx"] = ctx
 	var result = lua_func.invoke()
 	if result is LuaError:
-		push_error("[LuaRuntime] 执行卡牌 %s 出错: %s" % [card_id, str(result)])
+		push_error("[LuaRuntime] 执行卡牌 %s 出错: %s" % [base_id, str(result)])
 		return {}
 
 	return result if result is Dictionary else {}
@@ -178,14 +183,14 @@ func preview_card(card_id: String, ctx: Dictionary) -> Dictionary:
 	return execute_card(card_id, ctx)
 
 
-## 卡牌是否已有 Lua 实现（一致性校验器用）
+## 卡牌是否已有 Lua 实现（一致性校验器用；强化卡按基础卡判定）
 func has_card_impl(card_id: String) -> bool:
 	if not enabled or not _ready_flag:
 		return false
 	var card_effects = _lua.globals["CardEffects"]
 	if card_effects == null or card_effects is LuaError:
 		return false
-	return card_effects[card_id] != null
+	return card_effects[card_id.trim_suffix("+")] != null
 
 
 # ==============================================

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_tahdg"]
+
+[resource]
+script = ExtResource("1_tahdg")
+card_id = "xy_beiming+"
+card_name = "北冥神掌+"
+description = "造成4点伤害，回复2点生命
+[强化]"
+damage = 6
+heal = 2
+school = "xiaoyao"

@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_5f7xq"]
+
+[resource]
+script = ExtResource("1_5f7xq")
+card_id = "xy_yufeng+"
+card_name = "御风而行+"
+card_type = 1
+cost = 2
+description = "获得6点格挡。若手牌≥4张，额外获得4点
+[强化]"
+block = 8
+school = "xiaoyao"

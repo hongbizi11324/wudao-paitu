@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_ne2e2"]
+
+[resource]
+script = ExtResource("1_ne2e2")
+card_id = "sl_bodhi+"
+card_name = "菩提心+"
+card_type = 2
+cost = 0
+description = "能力：每回合开始时获得1层禅意和1点格挡
+[强化]"
+school = "shaolin"

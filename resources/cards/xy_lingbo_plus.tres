@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_h8i8d"]
+
+[resource]
+script = ExtResource("1_h8i8d")
+card_id = "xy_lingbo+"
+card_name = "凌波微步+"
+card_type = 1
+description = "获得6点格挡。本回合下一张牌费用-1
+[强化]"
+block = 8
+school = "xiaoyao"

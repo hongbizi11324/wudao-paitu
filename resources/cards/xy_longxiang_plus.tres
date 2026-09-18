@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_5noti"]
+
+[resource]
+script = ExtResource("1_5noti")
+card_id = "xy_longxiang+"
+card_name = "龙象般若+"
+card_type = 2
+cost = 3
+description = "每拥有1点未使用内力，造成的攻击伤害+2（持续生效）
+[强化]"
+school = "xiaoyao"

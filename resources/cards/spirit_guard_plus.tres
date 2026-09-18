@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_o6aps"]
+
+[resource]
+script = ExtResource("1_o6aps")
+card_id = "spirit_guard+"
+card_name = "灵盾+"
+card_type = 1
+cost = 2
+description = "获得10点格挡，抽1张牌
+[强化]"
+block = 14
+draw = 1

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_5aa6c"]
+
+[resource]
+script = ExtResource("1_5aa6c")
+card_id = "xy_tuna+"
+card_name = "吐纳归元+"
+card_type = 3
+description = "回复2点内力。若未使用完本回合内力，额外回复1点
+[强化]"
+energy_gain = 3
+school = "xiaoyao"

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_02cb6"]
+
+[resource]
+script = ExtResource("1_02cb6")
+card_id = "xy_xixing+"
+card_name = "吸星大法+"
+cost = 2
+description = "造成5点伤害。若敌人有护盾，伤害+5，并回复等量生命
+[强化]"
+damage = 7
+school = "xiaoyao"

@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_m02nm"]
+
+[resource]
+script = ExtResource("1_m02nm")
+card_id = "tactics+"
+card_name = "战术+"
+card_type = 1
+description = "抽2张牌
+[强化]"
+draw = 3

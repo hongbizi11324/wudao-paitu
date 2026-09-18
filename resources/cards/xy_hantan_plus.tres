@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_bvae8"]
+
+[resource]
+script = ExtResource("1_bvae8")
+card_id = "xy_hantan+"
+card_name = "寒潭映月+"
+card_type = 3
+cost = 0
+description = "获得1点内力。若满内力，额外获得1点
+[强化]"
+energy_gain = 2
+school = "xiaoyao"

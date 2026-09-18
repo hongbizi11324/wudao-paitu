@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_2ajmr"]
+
+[resource]
+script = ExtResource("1_2ajmr")
+card_id = "xy_bahuang+"
+card_name = "八荒六合+"
+card_type = 2
+cost = 2
+description = "每回合开始时回复3点生命，将1张随机基础牌加入手牌（消耗）
+[强化]"
+school = "xiaoyao"

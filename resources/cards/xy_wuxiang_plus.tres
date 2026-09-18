@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_cwwfu"]
+
+[resource]
+script = ExtResource("1_cwwfu")
+card_id = "xy_wuxiang+"
+card_name = "小无相功+"
+card_type = 1
+description = "复制弃牌堆最后一张非POWER牌到手牌（消耗）
+[强化]"
+school = "xiaoyao"

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_p2heb"]
+
+[resource]
+script = ExtResource("1_p2heb")
+card_id = "xy_xiaoyaoyou+"
+card_name = "逍遥游+"
+card_type = 2
+cost = 2
+description = "每回合手牌上限+2，手牌中所有攻击牌费用-1（消耗）
+[强化]"
+school = "xiaoyao"

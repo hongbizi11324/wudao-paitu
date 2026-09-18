@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CardData" format=3]
+
+[ext_resource type="Script" path="res://scripts/card_data.gd" id="1_au0r3"]
+
+[resource]
+script = ExtResource("1_au0r3")
+card_id = "iron_wall+"
+card_name = "铁壁+"
+card_type = 1
+cost = 2
+description = "获得8点格挡
+[强化]"
+block = 11

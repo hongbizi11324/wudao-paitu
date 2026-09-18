@@ -78,6 +78,47 @@ static func run() -> bool:
 	TestBase.assert_true(pool_sl.has("sl_fist"), "慧明池含少林卡")
 	TestBase.assert_false(pool_sl.has("xy_fengjuan"), "慧明池不含逍遥卡")
 
+	# ---------- 5.5 全卡资源加载校验（防止 .tres 语法错误静默丢卡）----------
+	var load_fail: Array = []
+	var base_count := 0
+	var plus_count := 0
+	var dir_c = DirAccess.open("res://resources/cards")
+	if dir_c:
+		dir_c.list_dir_begin()
+		var fn := dir_c.get_next()
+		while fn != "":
+			if fn.ends_with(".tres"):
+				var cid := fn.trim_suffix(".tres")
+				if cid.ends_with("_plus"):
+					plus_count += 1
+					cid = cid.trim_suffix("_plus") + "+"
+				else:
+					base_count += 1
+				var d: CardData = load("res://resources/cards/%s" % fn)
+				if d == null or d.card_id != cid:
+					load_fail.append(fn)
+			fn = dir_c.get_next()
+		dir_c.list_dir_end()
+	TestBase.assert_true(load_fail.is_empty(),
+		"全部卡牌资源可加载（基础%d + 强化%d，失败: %s）" % [base_count, plus_count, str(load_fail)])
+
+	# ---------- 5.6 强化系统 ----------
+	TestBase.assert_eq(GameData.card_path("strike"), "res://resources/cards/strike.tres", "普通卡路径")
+	TestBase.assert_eq(GameData.card_path("strike+"), "res://resources/cards/strike_plus.tres", "强化卡路径")
+	var up_strike: CardData = GameData.load_card("strike+")
+	TestBase.assert_true(up_strike != null, "强化卡可加载")
+	if up_strike:
+		TestBase.assert_true(up_strike.damage > 6, "强化打击伤害>基础6（实际%d）" % up_strike.damage)
+		TestBase.assert_eq(up_strike.card_id, "strike+", "强化卡id带+")
+
+	GameData.new_run()
+	GameData.player_deck = ["strike", "defend", "strike"]
+	TestBase.assert_true(GameData.upgrade_card("strike"), "强化牌组中的卡")
+	TestBase.assert_eq(GameData.player_deck.count("strike+"), 1, "牌组出现1张强化卡")
+	TestBase.assert_eq(GameData.player_deck.count("strike"), 1, "仍剩1张未强化")
+	TestBase.assert_false(GameData.upgrade_card("strike+"), "已强化的卡不能再强化")
+	TestBase.assert_eq(GameData.upgradeable_cards(1).size(), 2, "可强化卡数=2")
+
 	# ---------- 6. 存档回环（备份/恢复用户存档）----------
 	var save_exists = GameData.has_save()
 	var backup: String = ""
