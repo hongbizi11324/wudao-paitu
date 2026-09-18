@@ -7,6 +7,7 @@ extends Node
 #
 # 双人模式：敌人用自身已播种 RNG 从存活玩家中随机选攻击目标，
 # 不再写死只打 P1（旧 bug）
+# 支持多段攻击（同一目标连击 intent_times 次）
 # ==============================
 
 signal battle_end(won)
@@ -25,13 +26,25 @@ func execute_enemy_turn(players: Array, enemy) -> bool:
 	if is_attack:
 		var target = enemy.choose_target(players)
 		if target == null:
-			return false  # 没有存活目标（不该发生，防御式处理）
-		var dmg = enemy.get_attack_damage()
-		var actual = target.take_damage(dmg)
-		print("敌人攻击 %s，造成 %d 伤害（其 HP 剩余: %d/%d）" % [
-			"P2" if target.is_p2 else "P1", actual, target.hp, target.max_hp])
+			return false  # 没有存活目标（防御式处理）
+		var times: int = enemy.intent_times if enemy.is_multi_attack() else 1
+		var per_hit: int = enemy.get_attack_damage()
+		var total := 0
+		for i in range(times):
+			if target.hp <= 0:
+				break
+			total += target.take_damage(per_hit)
+		if times > 1:
+			print("敌人多段攻击 %s：%d×%d，共造成 %d 伤害（其 HP 剩余: %d/%d）" % [
+				"P2" if target.is_p2 else "P1", per_hit, times, total, target.hp, target.max_hp])
+		else:
+			print("敌人攻击 %s，造成 %d 伤害（其 HP 剩余: %d/%d）" % [
+				"P2" if target.is_p2 else "P1", total, target.hp, target.max_hp])
 	else:
-		print("敌人防御，当前护盾 %d" % enemy.block)
+		if enemy.intent_type == enemy.IntentType.BUFF:
+			print("敌人强化，当前力量 %d" % enemy.strength)
+		else:
+			print("敌人防御，当前护盾 %d" % enemy.block)
 
 	# 检查是否全灭
 	var any_alive = false

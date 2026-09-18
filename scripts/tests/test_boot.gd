@@ -44,6 +44,12 @@ func _ready():
 	if not TestBalance.run():
 		all_ok = false
 
+	# 4.6 敌人机制
+	print("\n▶ Enemy ...")
+	TestBase.reset()
+	if not TestEnemy.run():
+		all_ok = false
+
 	# 5. 战斗流程集成（真实场景，需要 await）
 	print("\n▶ BattleIntegration ...")
 	TestBase.reset()

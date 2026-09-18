@@ -1044,6 +1044,8 @@ func apply_snapshot(snap: Dictionary):
 		enemy.block = snap.get("enemy_block", 0)
 		enemy.intent_type = snap.get("enemy_intent_type", 0)
 		enemy.intent_value = snap.get("enemy_intent_val", 0)
+		enemy.intent_times = snap.get("enemy_intent_times", 1)
+		enemy.strength = snap.get("enemy_strength", 0)
 		enemy.intent_changed.emit(enemy.intent_type, enemy.intent_value)
 
 	# 敌人头像同步
@@ -1804,8 +1806,15 @@ func _on_enemy_block_changed(cur):
 
 
 func _on_enemy_intent_changed(type: int, value: int):
-	var intent_names = ["⚔攻击", "🛡防御"]
-	enemy_intent_label.text = "%s %d" % [intent_names[type], value]
+	var intent_names = ["⚔攻击", "🛡防御", "⚔⚔连击", "💪强化"]
+	var text := "%s %d" % [intent_names[type], value]
+	if type == Enemy.IntentType.MULTI_ATTACK:
+		text += "×%d" % enemy.intent_times
+	elif type == Enemy.IntentType.BUFF:
+		text = "💪强化 +%d" % value
+	enemy_intent_label.text = text
+	if enemy.strength > 0:
+		enemy_intent_label.text += "（力%d）" % enemy.strength
 	# 意图切换弹跳动画（手感）
 	enemy_intent_label.pivot_offset = enemy_intent_label.size / 2.0
 	var tw := create_tween()
