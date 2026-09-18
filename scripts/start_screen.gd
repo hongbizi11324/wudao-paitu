@@ -63,6 +63,24 @@ func _build_volume_ui():
 	mk_row.call("音效音量", 502, func(): return BgmManager.sfx_volume,
 		func(v): BgmManager.set_sfx_volume(v))
 
+	# 删除存档
+	var del_btn := Button.new()
+	del_btn.text = "删除存档"
+	del_btn.position = Vector2(20, 528)
+	del_btn.size = Vector2(100, 26)
+	del_btn.add_theme_font_size_override("font_size", 12)
+	del_btn.add_theme_color_override("font_color", Color(0.95, 0.5, 0.5, 0.9))
+	del_btn.pressed.connect(_on_delete_save)
+	add_child(del_btn)
+
+
+func _on_delete_save():
+	if GameData.has_save():
+		GameData.delete_save()
+		_toast("存档已删除")
+	else:
+		_toast("没有存档可删")
+
 
 func _on_start_hover():
 	var tw = create_tween()

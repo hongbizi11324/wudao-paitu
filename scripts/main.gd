@@ -88,6 +88,9 @@ var fx: BattleFX  # 战斗表现层（飘字/受击/横幅）
 # 战斗统计（胜利战报用）
 var _battle_stats: Dictionary = {"turns": 0, "cards": 0, "damage": 0, "max_hit": 0, "block": 0}
 
+# 首次战斗教学提示（每局只弹一次）
+var _tutorial_shown: bool = false
+
 # ==============================
 # 模式查询 / 玩家上下文
 # ==============================
@@ -1359,6 +1362,7 @@ func _start_battle():
 		if fx:
 			var lv_tag := "精英" if ft == GameData.FloorType.ELITE else "普通"
 			fx.show_banner("遭遇 · %s" % eid, "%s战 · 第%d层" % [lv_tag, GameData.current_floor], BattleFX.COLOR_INFO)
+		_show_tutorial_if_needed()
 
 	_update_floor_label()
 	var biome_names = ["竹林", "村庄", "官府", "门派"]
@@ -1370,6 +1374,18 @@ func _update_floor_label():
 	var ft = GameData.get_floor_type()
 	var ft_names = ["战斗", "⚔精英", "♛Boss"]
 	floor_label.text = "第 %d 层 · %s" % [GameData.current_floor, ft_names[ft]]
+
+
+## 首次战斗的操作引导（仅第一局第1层弹一次）
+func _show_tutorial_if_needed() -> void:
+	if _tutorial_shown or fx == null:
+		return
+	if GameData.current_floor > 2 or GameData.current_realm > 0:
+		return
+	_tutorial_shown = true
+	fx.show_banner("点击卡牌选中", "再次点击同一张卡即可打出", BattleFX.COLOR_INFO)
+	fx.show_banner("注意敌人意图", "⚔攻击会打你，🛡防御会给它叠盾", Color(0.95, 0.7, 0.3))
+	fx.show_banner("结束回合", "打不出牌时点击「结束回合」", BattleFX.COLOR_VICTORY)
 
 
 # ==============================
