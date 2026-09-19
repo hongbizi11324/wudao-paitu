@@ -7,6 +7,6 @@ script = ExtResource("1_lpd58")
 card_id = "heal+"
 card_name = "治疗+"
 card_type = 1
-description = "回复4点生命
+description = "回复8点生命
 [强化]"
-heal = 5
+heal = 11

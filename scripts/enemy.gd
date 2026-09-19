@@ -200,9 +200,9 @@ func _calc_attack_damage() -> int:
 	if floor_type == FloorType.BOSS:
 		var hp_pct = float(hp) / float(max_hp)
 		if hp_pct < 0.33:
-			return ceili(base * 2.0)   # 第三阶段：2x
+			return ceili(base * 1.6)   # 第三阶段：1.6x（原2.0x过狠，配合Boss伤害×1.25）
 		elif hp_pct < 0.66:
-			return ceili(base * 1.5)   # 第二阶段：1.5x
+			return ceili(base * 1.3)   # 第二阶段：1.3x
 
 	return base
 

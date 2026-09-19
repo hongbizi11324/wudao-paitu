@@ -7,7 +7,7 @@ script = ExtResource("1_wpilp")
 card_id = "vigor+"
 card_name = "活力+"
 card_type = 1
-description = "回复3点生命，抽1张牌
+description = "回复5点生命，抽1张牌
 [强化]"
-heal = 3
-draw = 2
+heal = 7
+draw = 1

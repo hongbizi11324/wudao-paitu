@@ -143,6 +143,11 @@ func _player_node(pid: int) -> Player:
 	return player2 if pid == 2 else player1
 
 
+## 玩家境界（P2 沿用队伍境界，内力上限共享）
+func _realm_of(_pid: int) -> int:
+	return GameData.current_realm
+
+
 func _hand_node(pid: int) -> Hand:
 	return hand2 if pid == 2 else hand1
 
@@ -436,7 +441,9 @@ func _start_player_turn(pid: int):
 		_reset_turn_track(pid)
 		var t: Dictionary = _track[pid]
 
-		var draw_count := CardExecutor.DRAW_PER_TURN
+		# 抽牌成长：境界越高每回合手牌越多（治本：让突破真正提升输出/防御上限）
+		# realm 0~1→4~5张，2~3→5~6张，4+→6~7张
+		var draw_count := CardExecutor.DRAW_PER_TURN + int((_realm_of(pid) + 1) / 2)
 		# 夜啸被动【血影】：HP<50% 时回合开始多抽1张
 		if p.character_id == "yexiao" and p.hp < p.max_hp * 0.5:
 			draw_count += 1
@@ -1227,6 +1234,8 @@ func _on_battle_end(won):
 	var reward: Dictionary = GameData.get_battle_reward()
 	# 遗物：战斗胜利额外收益（铜钱剑/悟道蒲团/血玉）
 	var relic_bonus: Dictionary = RelicEffects.on_battle_end(player1)
+	if _is_dual():
+		RelicEffects.on_battle_end(player2)
 	GameData.add_cultivation(int(reward["cultivation"]) + int(relic_bonus.get("cultivation", 0)))
 	GameData.add_gold(int(reward["gold"]) + int(relic_bonus.get("gold", 0)))
 
@@ -1429,8 +1438,10 @@ func _start_battle():
 	enemy_portrait.rotation = _enemy_portrait_base["rot"]
 	enemy_portrait.position = _enemy_portrait_base["pos"]
 
-	# 遗物：战斗开始钩子（玄铁护腕/聚气丹炉）
+	# 遗物：战斗开始钩子（玄铁护腕/聚气丹炉；双人各自结算）
 	RelicEffects.on_battle_start(player1)
+	if _is_dual():
+		RelicEffects.on_battle_start(player2)
 	_refresh_relic_bar()
 
 	var ft = GameData.get_floor_type()
@@ -1634,9 +1645,9 @@ func _apply_event_action(action: String):
 		"cultivate":
 			GameData.add_cultivation(15)
 		"teach":
-			# 传功：消耗20修为换随机新卡
-			if GameData.cultivation >= 20:
-				GameData.spend_cultivation(20)
+			# 传功：消耗12修为换随机新卡
+			if GameData.cultivation >= 12:
+				GameData.spend_cultivation(12)
 				GameData.add_card(GameData.get_random_new_card())
 		"ask":
 			GameData.add_cultivation(5)

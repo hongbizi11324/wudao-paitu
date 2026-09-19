@@ -80,9 +80,11 @@ func get_floor_type() -> FloorType:
 
 
 ## 敌人数值曲线（1.15 复合增长 + 类型系数）：
-## 普通层 floor10 ≈ 88 HP、精英 ×1.4、Boss ×3.8
-## Boss 系数经平衡模型标定：玩家境界成长（内力上限+1/境）使输出增长快于
-## 1.15^n，旧 ×2.2 会让第6层 Boss 仅 4 回合被秒。×3.8 后第6层≈7回合、第12层≈10回合。
+## 普通层 floor10 ≈ 88 HP、精英 ×1.4、Boss ×3.2
+## 曲线经「输出+承伤」双模型标定（见 tests/test_balance.gd）：
+##   - Boss 系数 ×3.8 时第6层需 7 回合，但玩家 4 张手牌无法同时满足
+##     "7回合击杀"与"挡住三段 43/回合"→ 数学上必死，故降到 ×3.2
+##   - 伤害曲线 1.15 → 1.10（HP 曲线保持 1.15，敌人仍随层变硬）
 func get_enemy_hp() -> int:
 	var multiplier = pow(1.15, current_floor - 1)
 	var base_hp = ceili(25 * multiplier)
@@ -90,13 +92,13 @@ func get_enemy_hp() -> int:
 		FloorType.ELITE:
 			return ceili(base_hp * 1.4)
 		FloorType.BOSS:
-			return ceili(base_hp * 3.8)
+			return ceili(base_hp * 2.8)
 		_:
 			return base_hp
 
 
 func get_enemy_damage_range() -> Array:
-	var multiplier = pow(1.15, current_floor - 1)
+	var multiplier = pow(1.10, current_floor - 1)
 	var dmg_min = maxi(1, ceili(3 * multiplier))
 	var dmg_max = maxi(2, ceili(6 * multiplier))
 	match _calc_floor_type(current_floor):
@@ -104,8 +106,8 @@ func get_enemy_damage_range() -> Array:
 			dmg_min = ceili(dmg_min * 1.2)
 			dmg_max = ceili(dmg_max * 1.2)
 		FloorType.BOSS:
-			dmg_min = ceili(dmg_min * 1.5)
-			dmg_max = ceili(dmg_max * 1.5)
+			dmg_min = ceili(dmg_min * 1.25)
+			dmg_max = ceili(dmg_max * 1.25)
 	return [dmg_min, dmg_max]
 
 
