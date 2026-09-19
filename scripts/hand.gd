@@ -98,7 +98,9 @@ func _rearrange():
 	if count == 0: return
 
 	if _tween: _tween.kill()
-	_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# 延迟创建：悬停/选中的卡不参与排列，若所有卡都被跳过（如手里只剩1张且正被选中），
+	# 不创建空 Tween —— 否则 Godot 报 "Tween started with no Tweeners"
+	_tween = null
 
 	var angle_step = 0.0
 	if count > 1: angle_step = max_fan_angle / (count - 1)    # 相邻卡牌的角度间隔
@@ -111,11 +113,14 @@ func _rearrange():
 		var rot = deg_to_rad(angle)                           # 卡牌旋转弧度
 
 		card.z_index = i                                      # 右牌盖左牌
-		if card != hovered_card and card != selected_card:    # 悬停/选中的卡不受排列影响
-			_tween.tween_property(card, "position", pos, 0.2)
-			_tween.tween_property(card, "rotation", rot, 0.2)
-			_tween.tween_property(card, "scale", Vector2.ONE, 0.2)
-			card.modulate.a = DIM_ALPHA if (hovered_card or selected_card) else 1.0
+		if card == hovered_card or card == selected_card:
+			continue                                          # 悬停/选中的卡不受排列影响
+		if _tween == null:
+			_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		_tween.tween_property(card, "position", pos, 0.2)
+		_tween.tween_property(card, "rotation", rot, 0.2)
+		_tween.tween_property(card, "scale", Vector2.ONE, 0.2)
+		card.modulate.a = DIM_ALPHA if (hovered_card or selected_card) else 1.0
 
 
 func _calc_arc_pos(angle_deg: float) -> Vector2:

@@ -56,6 +56,12 @@ func _ready():
 	if not TestRelics.run():
 		all_ok = false
 
+	# 4.75 手牌
+	print("\n▶ Hand ...")
+	TestBase.reset()
+	if not TestHand.run(self):
+		all_ok = false
+
 	# 4.8 丹药
 	print("\n▶ Potions ...")
 	TestBase.reset()
