@@ -238,6 +238,7 @@ func _ready():
 	shop_screen.delete_requested.connect(_on_shop_delete_requested)
 	shop_screen.refresh_requested.connect(_on_shop_refresh_requested)
 	shop_screen.refreshed.connect(_on_shop_refreshed)
+	shop_screen.relic_requested.connect(_on_shop_relic_requested)
 	node_map.node_selected.connect(_on_node_selected)
 	rest_screen.closed.connect(_on_rest_closed)
 	rest_screen.upgrade_requested.connect(_open_upgrade_picker)
@@ -328,7 +329,55 @@ func _prepare_battle_ui():
 	menu_btn.position = Vector2(10, 10)
 	menu_btn.visible = true
 
+	_build_relic_bar()
 	_update_ui()
+
+
+# ==============================
+# 遗物栏（战斗内显示）
+# ==============================
+
+var _relic_bar: VBoxContainer = null
+
+
+func _build_relic_bar():
+	if _relic_bar and is_instance_valid(_relic_bar):
+		return
+	_relic_bar = VBoxContainer.new()
+	_relic_bar.name = "RelicBar"
+	_relic_bar.position = Vector2(24, 204)
+	_relic_bar.add_theme_constant_override("separation", 1)
+	add_child(_relic_bar)
+
+
+## 刷新遗物列表（悬停显示说明）
+func _refresh_relic_bar():
+	if _relic_bar == null or not is_instance_valid(_relic_bar):
+		return
+	for c in _relic_bar.get_children():
+		c.queue_free()
+	if GameData.player_relics.is_empty():
+		return
+
+	var title := Label.new()
+	title.text = "── 遗物 ──"
+	title.add_theme_font_size_override("font_size", 11)
+	title.add_theme_color_override("font_color", Color(0.65, 0.6, 0.5, 0.8))
+	_relic_bar.add_child(title)
+
+	for rid in GameData.player_relics:
+		var l := Label.new()
+		l.text = "🔸 %s" % GameData.relic_name(rid)
+		l.tooltip_text = GameData.relic_desc(rid)
+		l.add_theme_font_size_override("font_size", 12)
+		var rarity: String = GameData.RELICS.get(rid, {}).get("rarity", "common")
+		var col := Color(0.85, 0.85, 0.9, 0.95)
+		match rarity:
+			"rare": col = Color(0.6, 0.8, 1.0, 1.0)
+			"boss": col = Color(1.0, 0.8, 0.4, 1.0)
+		l.add_theme_color_override("font_color", col)
+		l.mouse_filter = Control.MOUSE_FILTER_STOP
+		_relic_bar.add_child(l)
 
 
 # ==============================
@@ -385,12 +434,24 @@ func _start_player_turn(pid: int):
 	_with_player(pid, func():
 		p.refill_energy()
 		_reset_turn_track(pid)
+		var t: Dictionary = _track[pid]
 
 		var draw_count := CardExecutor.DRAW_PER_TURN
 		# 夜啸被动【血影】：HP<50% 时回合开始多抽1张
 		if p.character_id == "yexiao" and p.hp < p.max_hp * 0.5:
 			draw_count += 1
 			print("【被动·血影】HP<50%% → 多抽1张牌")
+
+		# 遗物：疾风靴（战斗第一回合额外抽2）
+		if not bool(t.get("battle_first_turn_done", false)):
+			t["battle_first_turn_done"] = true
+			if GameData.has_relic("wind_boots"):
+				draw_count += 2
+				print("【遗物·疾风靴】战斗首回合 +2 抽牌")
+
+		# 遗物：回合开始钩子（菩提佛珠/蛇胆/龙脉之心）
+		var relic_out: Dictionary = RelicEffects.on_turn_start(p, t)
+		draw_count += int(relic_out.get("extra_draw", 0))
 
 		var ex := _make_executor(pid)
 		ex.draw_cards(draw_count)
@@ -423,7 +484,15 @@ func _execute_enemy_turn():
 	var p1_blk_before: int = player1.block
 	var p2_blk_before: int = player2.block
 
-	var alive = gm.execute_enemy_turn(players, enemy)
+	var alive = gm.execute_enemy_turn(players, enemy, func(dmg: int, target) -> int:
+		# 遗物：护心镜（每回合首次受击减伤）+ 记录本回合受伤
+		var tpid := 2 if target.is_p2 else 1
+		var t: Dictionary = _track[tpid]
+		var modified: int = RelicEffects.modify_incoming_damage(dmg, t)
+		if modified > 0:
+			t["took_damage_this_turn"] = true
+		return modified
+	)
 	if game_over:
 		return
 
@@ -637,6 +706,9 @@ func _execute_card(card):
 		result = LuaRuntime.execute_card(data.card_id, ctx)
 	if result.is_empty():
 		result = _fallback_result(data)
+
+	# ---- 遗物修正清单（伤害/格挡/破甲）----
+	RelicEffects.modify_card_result(result, data, player, t)
 
 	# ---- 原子执行 ----
 	var e_hp_before: int = enemy.hp
@@ -930,6 +1002,8 @@ func _on_end_turn():
 func _do_end_turn():
 	if hand.selected_card != null:
 		hand.deselect()
+	# 遗物：回合结束钩子（龟息符）
+	RelicEffects.on_turn_end(player1)
 	var my_discard: Array = discard_pile
 	for c in hand.cards.duplicate():
 		if c.card_data.retain:
@@ -944,6 +1018,9 @@ func _do_end_turn():
 func _do_end_turn_for(player_id: int):
 	var target_hand := _hand_node(player_id)
 	var target_discard := _discard_pile_of(player_id)
+
+	# 遗物：回合结束钩子（龟息符）
+	RelicEffects.on_turn_end(_player_node(player_id))
 
 	if target_hand.selected_card != null:
 		target_hand.deselect()
@@ -992,6 +1069,8 @@ func apply_snapshot(snap: Dictionary):
 	GameData.max_energy_per_realm = snap.get("max_energy_per_realm", GameData.max_energy_per_realm)
 	GameData.gold = snap.get("gold", GameData.gold)
 	GameData.cultivation = snap.get("cultivation", GameData.cultivation)
+	GameData.player_relics = snap.get("relics", GameData.player_relics)
+	_refresh_relic_bar()
 
 	# 同步结束状态（客机可能没有 turn_manager）
 	var p1_ended = snap.get("p1_ended", false)
@@ -1146,8 +1225,23 @@ func _on_battle_end(won):
 	# 奖励随楼层类型缩放（与地图提示一致：普通10/12 精英20/20 Boss40/50）
 	var realm_before: int = GameData.current_realm
 	var reward: Dictionary = GameData.get_battle_reward()
-	GameData.add_cultivation(reward["cultivation"])
-	GameData.add_gold(reward["gold"])
+	# 遗物：战斗胜利额外收益（铜钱剑/悟道蒲团/血玉）
+	var relic_bonus: Dictionary = RelicEffects.on_battle_end(player1)
+	GameData.add_cultivation(int(reward["cultivation"]) + int(relic_bonus.get("cultivation", 0)))
+	GameData.add_gold(int(reward["gold"]) + int(relic_bonus.get("gold", 0)))
+
+	# 遗物掉落：精英必掉，Boss 必掉（Boss遗物优先）
+	var ft := GameData.get_floor_type()
+	if ft == GameData.FloorType.ELITE or ft == GameData.FloorType.BOSS:
+		var prefer := "boss" if ft == GameData.FloorType.BOSS else "rare"
+		var new_relic: String = GameData.get_random_relic(prefer)
+		if new_relic != "":
+			GameData.add_relic(new_relic)
+			if fx:
+				fx.show_banner("获得遗物 · %s" % GameData.relic_name(new_relic),
+					GameData.relic_desc(new_relic), BattleFX.COLOR_CHAN)
+			BgmManager.play_sfx("power")
+			_refresh_relic_bar()
 	# 突破横幅
 	if GameData.current_realm > realm_before:
 		if fx:
@@ -1334,6 +1428,10 @@ func _start_battle():
 	enemy_portrait.modulate = Color(1, 1, 1, 1)
 	enemy_portrait.rotation = _enemy_portrait_base["rot"]
 	enemy_portrait.position = _enemy_portrait_base["pos"]
+
+	# 遗物：战斗开始钩子（玄铁护腕/聚气丹炉）
+	RelicEffects.on_battle_start(player1)
+	_refresh_relic_bar()
 
 	var ft = GameData.get_floor_type()
 	var ft_names = ["普通", "精英", "Boss"]
@@ -1624,6 +1722,24 @@ func _on_shop_refreshed(stock: Array, sold: Array):
 	if NetworkManager.is_lan and NetworkManager.is_host:
 		NetworkManager.rpc("sync_shop_open", stock, sold)
 		NetworkManager.push_snapshot()
+
+
+func _on_shop_relic_requested(relic_id: String):
+	"""客机请求购买遗物 → 转发主机"""
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		NetworkManager.rpc_id(1, "request_shop_relic", relic_id)
+
+
+func network_shop_relic(relic_id: String):
+	"""主机收到客机遗物购买请求"""
+	if not NetworkManager.is_host or _node_result_done:
+		return
+	if not GameData.spend_gold(shop_screen.RELIC_PRICE):
+		return
+	shop_screen.apply_remote_relic(relic_id)
+	NetworkManager.rpc("sync_shop_update", shop_screen.stock, shop_screen.sold, GameData.gold)
+	NetworkManager.push_snapshot()
+	_refresh_relic_bar()
 
 
 func network_shop_refresh():

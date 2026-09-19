@@ -50,6 +50,12 @@ func _ready():
 	if not TestEnemy.run():
 		all_ok = false
 
+	# 4.7 遗物
+	print("\n▶ Relics ...")
+	TestBase.reset()
+	if not TestRelics.run():
+		all_ok = false
+
 	# 5. 战斗流程集成（真实场景，需要 await）
 	print("\n▶ BattleIntegration ...")
 	TestBase.reset()

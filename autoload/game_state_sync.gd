@@ -43,6 +43,7 @@ func build_snapshot(main_node: Node) -> Dictionary:
 		"max_energy_per_realm": GameData.max_energy_per_realm,
 		"cultivation": GameData.cultivation,
 		"gold": GameData.gold,
+		"relics": GameData.player_relics.duplicate(),
 	}
 
 	for c in main_node.hand1.cards:

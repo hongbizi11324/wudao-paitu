@@ -317,6 +317,16 @@ func request_shop_refresh():
 	_safe_call("network_shop_refresh", [])
 
 
+# 客机 → 主机：商店购买遗物
+@rpc("any_peer", "reliable")
+func request_shop_relic(relic_id: String):
+	if not is_host:
+		return
+	if relic_id.length() == 0 or relic_id.length() > 64:
+		return
+	_safe_call("network_shop_relic", [relic_id])
+
+
 # 客机 → 主机：商店逛完
 @rpc("any_peer", "reliable")
 func request_shop_done():

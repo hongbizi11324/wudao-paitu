@@ -15,8 +15,9 @@ signal battle_end(won)
 
 ## 执行敌人回合（纯函数，不管理回合切换）
 ## players: 候选目标数组（单人=[P1]，双人=[P1,P2]）
+## damage_filter: 可选 (伤害, 目标) -> 修正后伤害（遗物减伤等）
 ## 返回 true = 有玩家存活，false = 全灭
-func execute_enemy_turn(players: Array, enemy) -> bool:
+func execute_enemy_turn(players: Array, enemy, damage_filter: Callable = Callable()) -> bool:
 	# 敌人回合开始被动效果（精英/Boss 额外护盾）
 	enemy.on_turn_start()
 
@@ -33,7 +34,10 @@ func execute_enemy_turn(players: Array, enemy) -> bool:
 		for i in range(times):
 			if target.hp <= 0:
 				break
-			total += target.take_damage(per_hit)
+			var hit := per_hit
+			if damage_filter.is_valid():
+				hit = int(damage_filter.call(per_hit, target))
+			total += target.take_damage(hit)
 		if times > 1:
 			print("敌人多段攻击 %s：%d×%d，共造成 %d 伤害（其 HP 剩余: %d/%d）" % [
 				"P2" if target.is_p2 else "P1", per_hit, times, total, target.hp, target.max_hp])

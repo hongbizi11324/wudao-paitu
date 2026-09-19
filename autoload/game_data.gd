@@ -315,6 +315,123 @@ func get_character_pool(character_id: String = "", extra_schools: Array = []) ->
 var _card_cache: Dictionary = {}
 
 
+# ---------- 遗物系统（参考杀戮尖塔） ----------
+#
+# 遗物 = 跨战斗永久生效的被动道具。效果实现见 scripts/relic_effects.gd。
+# 稀有度：common(普通) / rare(稀有) / boss(Boss遗物)
+
+const RELICS: Dictionary = {
+	# ---- 普通：数值型小加成 ----
+	"iron_bracer": {
+		"name": "玄铁护腕", "rarity": "common",
+		"desc": "战斗开始时获得 5 点格挡",
+	},
+	"war_token": {
+		"name": "破军令", "rarity": "common",
+		"desc": "所有攻击牌伤害 +1",
+	},
+	"iron_manual": {
+		"name": "铁布衫秘卷", "rarity": "common",
+		"desc": "所有技能牌格挡 +2",
+	},
+	"coin_sword": {
+		"name": "铜钱剑", "rarity": "common",
+		"desc": "每场战斗胜利额外获得 10 金币",
+	},
+	"wind_boots": {
+		"name": "疾风靴", "rarity": "common",
+		"desc": "战斗第一回合额外抽 2 张牌",
+	},
+	"snake_gall": {
+		"name": "蛇胆", "rarity": "common",
+		"desc": "每回合开始时，若生命低于 50%，获得 3 点格挡",
+	},
+	# ---- 稀有：机制型 ----
+	"prayer_beads": {
+		"name": "菩提佛珠", "rarity": "rare",
+		"desc": "每回合开始时获得 1 层禅意",
+	},
+	"sword_tassel": {
+		"name": "剑穗", "rarity": "rare",
+		"desc": "每回合第一张攻击牌伤害 +4",
+	},
+	"turtle_charm": {
+		"name": "龟息符", "rarity": "rare",
+		"desc": "每回合结束时，若格挡不低于 10，回复 2 点生命",
+	},
+	"heart_mirror": {
+		"name": "护心镜", "rarity": "rare",
+		"desc": "每回合首次受到的攻击伤害 -2",
+	},
+	"meditation_cushion": {
+		"name": "悟道蒲团", "rarity": "rare",
+		"desc": "每场战斗胜利额外获得 5 修为",
+	},
+	"blood_jade": {
+		"name": "血玉", "rarity": "rare",
+		"desc": "每场战斗胜利后回复 6 点生命",
+	},
+	# ---- Boss 遗物：强力 ----
+	"qi_furnace": {
+		"name": "聚气丹炉", "rarity": "boss",
+		"desc": "战斗开始时内力上限 +1（本场战斗每回合多 1 点内力）",
+	},
+	"dragon_vein": {
+		"name": "龙脉之心", "rarity": "boss",
+		"desc": "每回合开始时，若上回合未受伤，抽 1 张牌",
+	},
+	"arhat_manual": {
+		"name": "罗汉拳谱", "rarity": "boss",
+		"desc": "每回合第一张攻击牌额外获得 5 点破甲",
+	},
+}
+
+var player_relics: Array = []
+
+
+func add_relic(relic_id: String) -> bool:
+	if relic_id == "" or has_relic(relic_id) or not RELICS.has(relic_id):
+		return false
+	player_relics.append(relic_id)
+	print("【遗物】获得 %s" % RELICS[relic_id]["name"])
+	return true
+
+
+func has_relic(relic_id: String) -> bool:
+	return player_relics.has(relic_id)
+
+
+func relic_name(relic_id: String) -> String:
+	return RELICS.get(relic_id, {}).get("name", relic_id)
+
+
+func relic_desc(relic_id: String) -> String:
+	return RELICS.get(relic_id, {}).get("desc", "")
+
+
+## 随机一个未拥有的遗物（按稀有度权重抽取）
+func get_random_relic(prefer_rarity: String = "") -> String:
+	var pool: Array = []
+	for rid in RELICS.keys():
+		if has_relic(rid):
+			continue
+		var rarity: String = RELICS[rid]["rarity"]
+		var weight := 1
+		match rarity:
+			"common": weight = 6
+			"rare": weight = 3
+			"boss": weight = 1
+		# 偏好稀有度：精英/商店更容易给稀有好东西
+		if prefer_rarity != "" and rarity == prefer_rarity:
+			weight *= 3
+		for i in range(weight):
+			pool.append(rid)
+	if pool.is_empty():
+		return ""
+	pool.shuffle()
+	return pool[0]
+
+
 ## 卡牌ID → 资源路径。
 ## 强化卡用 "+" 后缀（如 "strike+"），文件名对应 "strike_plus.tres"。
 func card_path(card_id: String) -> String:
@@ -476,6 +593,7 @@ func new_run():
 	player2_max_hp = 60
 	player2_deck = []
 	player2_realm = 0
+	player_relics = []
 	_reset_map_state()
 	print("【新局】第1层·淬体境起步，牌组 %d 张" % player_deck.size())
 
@@ -896,7 +1014,8 @@ func save_game():
 			"gold": gold,
 			"hp": player_hp,
 			"max_hp": player_max_hp,
-			"deck": player_deck.duplicate()
+			"deck": player_deck.duplicate(),
+			"relics": player_relics.duplicate()
 		},
 		"player2": {
 			"character": selected_character_2,
@@ -954,6 +1073,7 @@ func load_game() -> bool:
 	player_hp = p["hp"]
 	player_max_hp = p["max_hp"]
 	player_deck = p["deck"]
+	player_relics = p.get("relics", [])
 	
 	var p2 = parsed.get("player2", {})
 	selected_character_2 = p2.get("character", "")

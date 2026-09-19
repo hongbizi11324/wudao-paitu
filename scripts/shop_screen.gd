@@ -15,15 +15,18 @@ signal buy_requested(card_id: String, target_player: int)   # 联机客机 → �
 signal delete_requested(card_id: String, target_player: int)
 signal refresh_requested()   # 联机客机 → 请求主机刷新
 signal refreshed(stock: Array, sold: Array)  # 本端刷新成功 → 主机广播
+signal relic_requested(relic_id: String)     # 联机客机 → 请求主机结算遗物
 
 const BUY_PRICE: int = 10
 const DELETE_PRICE: int = 6
 const REFRESH_PRICE: int = 4
+const RELIC_PRICE: int = 45
 const STOCK_COUNT: int = 3
 
 var stock: Array = []        # 库存槽位：card_id，"" 表示已售罄
 var sold: Array = []         # 各槽位是否已售出
 var target_player: int = 1   # 双人模式：当前操作的牌组（1=P1 / 2=P2）
+var relic_offer: String = ""  # 本店出售的遗物（""=无）
 
 @onready var overlay = $Overlay
 @onready var panel = $Panel
@@ -60,7 +63,10 @@ func open(host_stock: Array = [], host_sold: Array = []):
 		sold = host_sold.duplicate()
 	else:
 		_restock()
+		# 遗物货架：随机一个未拥有的遗物
+		relic_offer = GameData.get_random_relic("rare")
 	_setup_target_toggle()
+	_refresh_relic_offer()
 	_refresh_all()
 	msg_label.text = ""
 	visible = true
@@ -71,6 +77,60 @@ func refresh_synced(new_stock: Array, new_sold: Array):
 	stock = new_stock.duplicate()
 	sold = new_sold.duplicate()
 	_refresh_all()
+
+
+## 联机：同步遗物货架
+func set_relic_offer(relic_id: String):
+	relic_offer = relic_id
+	_refresh_relic_offer()
+
+
+# ==============================
+# 遗物货架
+# ==============================
+
+var _relic_btn: Button = null
+
+
+func _refresh_relic_offer():
+	if _relic_btn and is_instance_valid(_relic_btn):
+		_relic_btn.queue_free()
+		_relic_btn = null
+	if relic_offer == "":
+		return
+	_relic_btn = Button.new()
+	_relic_btn.text = "遗物·%s（%d金）" % [GameData.relic_name(relic_offer), RELIC_PRICE]
+	_relic_btn.tooltip_text = GameData.relic_desc(relic_offer)
+	_relic_btn.position = Vector2(580, 62)
+	_relic_btn.size = Vector2(300, 32)
+	_relic_btn.add_theme_font_size_override("font_size", 14)
+	_relic_btn.add_theme_color_override("font_color", Color(1, 0.85, 0.45, 1))
+	_relic_btn.pressed.connect(_on_buy_relic)
+	panel.add_child(_relic_btn)
+
+
+func _on_buy_relic():
+	if relic_offer == "":
+		return
+	# 联机客机：请求主机结算
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		relic_requested.emit(relic_offer)
+		return
+	if not GameData.spend_gold(RELIC_PRICE):
+		_toast("金币不足！")
+		return
+	GameData.add_relic(relic_offer)
+	_toast("购得遗物·%s" % GameData.relic_name(relic_offer))
+	relic_offer = ""
+	_refresh_relic_offer()
+	_update_gold()
+
+
+## 联机：主机代客机结算遗物购买（扣钱由调用方完成）
+func apply_remote_relic(relic_id: String) -> void:
+	GameData.add_relic(relic_id)
+	relic_offer = ""
+	_refresh_relic_offer()
 
 
 # ==============================
