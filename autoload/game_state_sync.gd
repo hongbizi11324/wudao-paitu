@@ -44,6 +44,7 @@ func build_snapshot(main_node: Node) -> Dictionary:
 		"cultivation": GameData.cultivation,
 		"gold": GameData.gold,
 		"relics": GameData.player_relics.duplicate(),
+		"potions": GameData.player_potions.duplicate(),
 	}
 
 	for c in main_node.hand1.cards:

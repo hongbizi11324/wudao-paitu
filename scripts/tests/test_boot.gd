@@ -56,6 +56,12 @@ func _ready():
 	if not TestRelics.run():
 		all_ok = false
 
+	# 4.8 丹药
+	print("\n▶ Potions ...")
+	TestBase.reset()
+	if not TestPotions.run(self):
+		all_ok = false
+
 	# 5. 战斗流程集成（真实场景，需要 await）
 	print("\n▶ BattleIntegration ...")
 	TestBase.reset()

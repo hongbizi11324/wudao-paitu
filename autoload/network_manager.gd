@@ -317,6 +317,16 @@ func request_shop_refresh():
 	_safe_call("network_shop_refresh", [])
 
 
+# 客机 → 主机：使用丹药
+@rpc("any_peer", "reliable")
+func request_potion(potion_id: String):
+	if not is_host:
+		return
+	if potion_id.length() == 0 or potion_id.length() > 64:
+		return
+	_safe_call("network_potion", [potion_id])
+
+
 # 客机 → 主机：商店购买遗物
 @rpc("any_peer", "reliable")
 func request_shop_relic(relic_id: String):
@@ -325,6 +335,16 @@ func request_shop_relic(relic_id: String):
 	if relic_id.length() == 0 or relic_id.length() > 64:
 		return
 	_safe_call("network_shop_relic", [relic_id])
+
+
+# 客机 → 主机：商店购买丹药
+@rpc("any_peer", "reliable")
+func request_shop_potion(potion_id: String):
+	if not is_host:
+		return
+	if potion_id.length() == 0 or potion_id.length() > 64:
+		return
+	_safe_call("network_shop_potion", [potion_id])
 
 
 # 客机 → 主机：商店逛完

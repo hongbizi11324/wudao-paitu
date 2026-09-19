@@ -434,6 +434,111 @@ func get_random_relic(prefer_rarity: String = "") -> String:
 	return pool[0]
 
 
+# ---------- 丹药（消耗品，参考杀戮尖塔药水） ----------
+#
+# 携带上限 3 个；战斗中点击使用（每回合最多 1 个），用后消耗。
+# 效果实现见 scripts/potion_effects.gd。
+
+const MAX_POTIONS: int = 3
+const POTIONS: Dictionary = {
+	"small_pill": {
+		"name": "小还丹", "rarity": "common",
+		"desc": "回复 15 点生命",
+	},
+	"focus_powder": {
+		"name": "凝神散", "rarity": "common",
+		"desc": "立即获得 2 点内力",
+	},
+	"vajra_pill": {
+		"name": "金刚丹", "rarity": "common",
+		"desc": "获得 12 点格挡",
+	},
+	"swift_powder": {
+		"name": "疾风散", "rarity": "common",
+		"desc": "抽 2 张牌",
+	},
+	"fire_wine": {
+		"name": "烈火酒", "rarity": "rare",
+		"desc": "本回合内所有攻击牌伤害 +4",
+	},
+	"awaken_wine": {
+		"name": "醒神酒", "rarity": "rare",
+		"desc": "抽 3 张牌并获得 1 点内力",
+	},
+	"melt_powder": {
+		"name": "化功散", "rarity": "rare",
+		"desc": "摧毁敌人 25 点护盾，并造成 8 点伤害",
+	},
+	"golden_pill": {
+		"name": "九转金丹", "rarity": "boss",
+		"desc": "本场战斗内力上限 +2，并立即回满内力",
+	},
+}
+
+var player_potions: Array = []
+
+
+func add_potion(potion_id: String) -> bool:
+	if potion_id == "" or not POTIONS.has(potion_id):
+		return false
+	if player_potions.size() >= MAX_POTIONS:
+		return false
+	player_potions.append(potion_id)
+	print("【丹药】获得 %s" % POTIONS[potion_id]["name"])
+	return true
+
+
+func remove_potion(potion_id: String) -> bool:
+	var idx := player_potions.find(potion_id)
+	if idx == -1:
+		return false
+	player_potions.remove_at(idx)
+	return true
+
+
+func potion_name(potion_id: String) -> String:
+	return POTIONS.get(potion_id, {}).get("name", potion_id)
+
+
+func potion_desc(potion_id: String) -> String:
+	return POTIONS.get(potion_id, {}).get("desc", "")
+
+
+## 随机一个丹药（可指定偏好稀有度）
+func get_random_potion(prefer_rarity: String = "") -> String:
+	var pool: Array = []
+	for pid in POTIONS.keys():
+		var rarity: String = POTIONS[pid]["rarity"]
+		var weight := 6 if rarity == "common" else (3 if rarity == "rare" else 1)
+		if prefer_rarity != "" and rarity == prefer_rarity:
+			weight *= 3
+		for i in range(weight):
+			pool.append(pid)
+	if pool.is_empty():
+		return ""
+	pool.shuffle()
+	return pool[0]
+
+
+## 战斗奖励掉落：普通战 20% / 精英 60% / Boss 100%
+func roll_potion_drop() -> String:
+	var ft := _calc_floor_type(current_floor)
+	var chance := 0.2
+	var prefer := "common"
+	match ft:
+		FloorType.ELITE:
+			chance = 0.6
+			prefer = "rare"
+		FloorType.BOSS:
+			chance = 1.0
+			prefer = "boss"
+	if player_potions.size() >= MAX_POTIONS:
+		return ""
+	if randf() > chance:
+		return ""
+	return get_random_potion(prefer)
+
+
 ## 卡牌ID → 资源路径。
 ## 强化卡用 "+" 后缀（如 "strike+"），文件名对应 "strike_plus.tres"。
 func card_path(card_id: String) -> String:
@@ -596,6 +701,7 @@ func new_run():
 	player2_deck = []
 	player2_realm = 0
 	player_relics = []
+	player_potions = []
 	_reset_map_state()
 	print("【新局】第1层·淬体境起步，牌组 %d 张" % player_deck.size())
 
@@ -1017,7 +1123,8 @@ func save_game():
 			"hp": player_hp,
 			"max_hp": player_max_hp,
 			"deck": player_deck.duplicate(),
-			"relics": player_relics.duplicate()
+			"relics": player_relics.duplicate(),
+			"potions": player_potions.duplicate()
 		},
 		"player2": {
 			"character": selected_character_2,
@@ -1076,6 +1183,7 @@ func load_game() -> bool:
 	player_max_hp = p["max_hp"]
 	player_deck = p["deck"]
 	player_relics = p.get("relics", [])
+	player_potions = p.get("potions", [])
 	
 	var p2 = parsed.get("player2", {})
 	selected_character_2 = p2.get("character", "")

@@ -16,17 +16,20 @@ signal delete_requested(card_id: String, target_player: int)
 signal refresh_requested()   # 联机客机 → 请求主机刷新
 signal refreshed(stock: Array, sold: Array)  # 本端刷新成功 → 主机广播
 signal relic_requested(relic_id: String)     # 联机客机 → 请求主机结算遗物
+signal potion_requested(potion_id: String)   # 联机客机 → 请求主机结算丹药
 
 const BUY_PRICE: int = 10
 const DELETE_PRICE: int = 6
 const REFRESH_PRICE: int = 4
 const RELIC_PRICE: int = 45
+const POTION_PRICE: int = 25
 const STOCK_COUNT: int = 3
 
 var stock: Array = []        # 库存槽位：card_id，"" 表示已售罄
 var sold: Array = []         # 各槽位是否已售出
 var target_player: int = 1   # 双人模式：当前操作的牌组（1=P1 / 2=P2）
 var relic_offer: String = ""  # 本店出售的遗物（""=无）
+var potion_offer: String = "" # 本店出售的丹药（""=无）
 
 @onready var overlay = $Overlay
 @onready var panel = $Panel
@@ -65,8 +68,11 @@ func open(host_stock: Array = [], host_sold: Array = []):
 		_restock()
 		# 遗物货架：随机一个未拥有的遗物
 		relic_offer = GameData.get_random_relic("rare")
+		# 丹药货架：随机一个丹药（背包满则不摆）
+		potion_offer = GameData.get_random_potion("") if GameData.player_potions.size() < GameData.MAX_POTIONS else ""
 	_setup_target_toggle()
 	_refresh_relic_offer()
+	_refresh_potion_offer()
 	_refresh_all()
 	msg_label.text = ""
 	visible = true
@@ -131,6 +137,56 @@ func apply_remote_relic(relic_id: String) -> void:
 	GameData.add_relic(relic_id)
 	relic_offer = ""
 	_refresh_relic_offer()
+
+
+# ==============================
+# 丹药货架
+# ==============================
+
+var _potion_btn: Button = null
+
+
+func _refresh_potion_offer():
+	if _potion_btn and is_instance_valid(_potion_btn):
+		_potion_btn.queue_free()
+		_potion_btn = null
+	if potion_offer == "":
+		return
+	_potion_btn = Button.new()
+	_potion_btn.text = "丹药·%s（%d金）" % [GameData.potion_name(potion_offer), POTION_PRICE]
+	_potion_btn.tooltip_text = GameData.potion_desc(potion_offer)
+	_potion_btn.position = Vector2(890, 62)
+	_potion_btn.size = Vector2(200, 32)
+	_potion_btn.add_theme_font_size_override("font_size", 14)
+	_potion_btn.add_theme_color_override("font_color", Color(0.6, 1, 0.75, 1))
+	_potion_btn.pressed.connect(_on_buy_potion)
+	panel.add_child(_potion_btn)
+
+
+func _on_buy_potion():
+	if potion_offer == "":
+		return
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		potion_requested.emit(potion_offer)
+		return
+	if GameData.player_potions.size() >= GameData.MAX_POTIONS:
+		_toast("丹药已满（最多 %d 个）" % GameData.MAX_POTIONS)
+		return
+	if not GameData.spend_gold(POTION_PRICE):
+		_toast("金币不足！")
+		return
+	GameData.add_potion(potion_offer)
+	_toast("购得丹药·%s" % GameData.potion_name(potion_offer))
+	potion_offer = ""
+	_refresh_potion_offer()
+	_update_gold()
+
+
+## 联机：主机代客机结算丹药购买
+func apply_remote_potion(potion_id: String) -> void:
+	GameData.add_potion(potion_id)
+	potion_offer = ""
+	_refresh_potion_offer()
 
 
 # ==============================

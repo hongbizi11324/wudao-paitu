@@ -244,6 +244,7 @@ func _ready():
 	shop_screen.refresh_requested.connect(_on_shop_refresh_requested)
 	shop_screen.refreshed.connect(_on_shop_refreshed)
 	shop_screen.relic_requested.connect(_on_shop_relic_requested)
+	shop_screen.potion_requested.connect(_on_shop_potion_requested)
 	node_map.node_selected.connect(_on_node_selected)
 	rest_screen.closed.connect(_on_rest_closed)
 	rest_screen.upgrade_requested.connect(_open_upgrade_picker)
@@ -335,7 +336,100 @@ func _prepare_battle_ui():
 	menu_btn.visible = true
 
 	_build_relic_bar()
+	_build_potion_bar()
 	_update_ui()
+
+
+# ==============================
+# 丹药栏（战斗内使用消耗品）
+# ==============================
+
+var _potion_bar: HBoxContainer = null
+var _potion_used_this_turn: Dictionary = {1: false, 2: false}
+
+
+func _build_potion_bar():
+	if _potion_bar and is_instance_valid(_potion_bar):
+		return
+	_potion_bar = HBoxContainer.new()
+	_potion_bar.name = "PotionBar"
+	_potion_bar.position = Vector2(24, 640)
+	_potion_bar.add_theme_constant_override("separation", 6)
+	add_child(_potion_bar)
+
+
+## 刷新丹药栏（点击使用；每回合每玩家限 1 个）
+func _refresh_potion_bar():
+	if _potion_bar == null or not is_instance_valid(_potion_bar):
+		return
+	for c in _potion_bar.get_children():
+		c.queue_free()
+	if GameData.player_potions.is_empty():
+		return
+
+	var can_use := not game_over \
+			and turn_manager and turn_manager.current_turn == TurnManager.Turn.PLAYER1 \
+			and not bool(_potion_used_this_turn.get(_active_player, false))
+
+	var idx := 0
+	for pid in GameData.player_potions:
+		var btn := Button.new()
+		btn.text = GameData.potion_name(pid)
+		btn.tooltip_text = GameData.potion_desc(pid)
+		btn.custom_minimum_size = Vector2(86, 26)
+		btn.add_theme_font_size_override("font_size", 12)
+		var rarity: String = GameData.POTIONS.get(pid, {}).get("rarity", "common")
+		var col := Color(0.9, 0.9, 0.95, 1)
+		match rarity:
+			"rare": col = Color(0.6, 0.85, 1.0, 1)
+			"boss": col = Color(1.0, 0.8, 0.4, 1)
+		btn.add_theme_color_override("font_color", col)
+		btn.disabled = not can_use
+		btn.pressed.connect(_on_potion_pressed.bind(pid))
+		_potion_bar.add_child(btn)
+		idx += 1
+
+
+func _on_potion_pressed(potion_id: String):
+	# 联机客机：请求主机结算
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		NetworkManager.rpc_id(1, "request_potion", potion_id)
+		return
+	_use_potion(potion_id, _active_player)
+	if NetworkManager.is_lan and NetworkManager.is_host:
+		NetworkManager.push_snapshot()
+
+
+## 实际使用丹药（主机/单机）
+func _use_potion(potion_id: String, pid: int) -> bool:
+	if bool(_potion_used_this_turn.get(pid, false)):
+		return false
+	var p := _player_node(pid)
+	var ctx := {
+		"player": p,
+		"enemy": enemy,
+		"track": _track[pid],
+		"executor": _make_executor(pid),
+	}
+	if not PotionEffects.use(potion_id, ctx):
+		return false
+	GameData.remove_potion(potion_id)
+	_potion_used_this_turn[pid] = true
+	BgmManager.play_sfx("heal")
+	_update_ui()
+	_refresh_potion_bar()
+	_update_deck_ui()
+	if enemy.hp <= 0 and not game_over:
+		_on_battle_end(true)
+	return true
+
+
+func network_potion(potion_id: String):
+	"""主机收到客机使用丹药请求"""
+	if not NetworkManager.is_host:
+		return
+	if _use_potion(potion_id, 2):
+		NetworkManager.push_snapshot()
 
 
 # ==============================
@@ -464,6 +558,8 @@ func _start_player_turn(pid: int):
 		ex.draw_cards(draw_count)
 		_trigger_power_effects(p, pid)
 		h.apply_limit_mod(p.hand_limit_mod)
+		# 丹药：每回合使用次数重置
+		_potion_used_this_turn[pid] = false
 	)
 
 
@@ -716,6 +812,8 @@ func _execute_card(card):
 
 	# ---- 遗物修正清单（伤害/格挡/破甲）----
 	RelicEffects.modify_card_result(result, data, player, t)
+	# ---- 丹药修正（烈火酒：本回合攻击牌 +4）----
+	PotionEffects.apply_attack_bonus(result, data, t)
 
 	# ---- 原子执行 ----
 	var e_hp_before: int = enemy.hp
@@ -1077,7 +1175,9 @@ func apply_snapshot(snap: Dictionary):
 	GameData.gold = snap.get("gold", GameData.gold)
 	GameData.cultivation = snap.get("cultivation", GameData.cultivation)
 	GameData.player_relics = snap.get("relics", GameData.player_relics)
+	GameData.player_potions = snap.get("potions", GameData.player_potions)
 	_refresh_relic_bar()
+	_refresh_potion_bar()
 
 	# 同步结束状态（客机可能没有 turn_manager）
 	var p1_ended = snap.get("p1_ended", false)
@@ -1251,6 +1351,16 @@ func _on_battle_end(won):
 					GameData.relic_desc(new_relic), BattleFX.COLOR_CHAN)
 			BgmManager.play_sfx("power")
 			_refresh_relic_bar()
+
+	# 丹药掉落（普通20% / 精英60% / Boss100%）
+	var new_potion: String = GameData.roll_potion_drop()
+	if new_potion != "":
+		GameData.add_potion(new_potion)
+		if fx:
+			fx.show_banner("获得丹药 · %s" % GameData.potion_name(new_potion),
+				GameData.potion_desc(new_potion), BattleFX.COLOR_HEAL)
+		BgmManager.play_sfx("energy")
+		_refresh_potion_bar()
 	# 突破横幅
 	if GameData.current_realm > realm_before:
 		if fx:
@@ -1443,6 +1553,7 @@ func _start_battle():
 	if _is_dual():
 		RelicEffects.on_battle_start(player2)
 	_refresh_relic_bar()
+	_refresh_potion_bar()
 
 	var ft = GameData.get_floor_type()
 	var ft_names = ["普通", "精英", "Boss"]
@@ -1751,6 +1862,26 @@ func network_shop_relic(relic_id: String):
 	NetworkManager.rpc("sync_shop_update", shop_screen.stock, shop_screen.sold, GameData.gold)
 	NetworkManager.push_snapshot()
 	_refresh_relic_bar()
+
+
+func _on_shop_potion_requested(potion_id: String):
+	"""客机请求购买丹药 → 转发主机"""
+	if NetworkManager.is_lan and not NetworkManager.is_host:
+		NetworkManager.rpc_id(1, "request_shop_potion", potion_id)
+
+
+func network_shop_potion(potion_id: String):
+	"""主机收到客机丹药购买请求"""
+	if not NetworkManager.is_host or _node_result_done:
+		return
+	if GameData.player_potions.size() >= GameData.MAX_POTIONS:
+		return
+	if not GameData.spend_gold(shop_screen.POTION_PRICE):
+		return
+	shop_screen.apply_remote_potion(potion_id)
+	NetworkManager.rpc("sync_shop_update", shop_screen.stock, shop_screen.sold, GameData.gold)
+	NetworkManager.push_snapshot()
+	_refresh_potion_bar()
 
 
 func network_shop_refresh():
