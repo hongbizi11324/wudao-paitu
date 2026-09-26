@@ -4,3 +4,6 @@
 
 .codely-cli/
 addons/lua-gdextension/build/~*
+
+# 导出产物
+build/
